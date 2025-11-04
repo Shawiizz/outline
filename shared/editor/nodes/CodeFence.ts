@@ -152,7 +152,7 @@ export default class CodeFence extends Node {
       },
       runPython: (): Command => (state) => {
         const codeBlock = findParentNode(isCode)(state.selection);
-        
+
         if (!codeBlock) {
           return false;
         }
@@ -169,7 +169,7 @@ export default class CodeFence extends Node {
           },
         });
         window.dispatchEvent(event);
-        
+
         return true;
       },
     };

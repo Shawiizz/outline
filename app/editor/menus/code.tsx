@@ -34,10 +34,10 @@ export default function codeMenuItems(
   const getLanguageMenuItems = () =>
     frequentLangMenuItems.length
       ? [
-          ...frequentLangMenuItems,
-          { name: "separator" },
-          ...remainingLangMenuItems,
-        ]
+        ...frequentLangMenuItems,
+        { name: "separator" },
+        ...remainingLangMenuItems,
+      ]
       : remainingLangMenuItems;
 
   const items: MenuItem[] = [

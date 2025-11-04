@@ -122,7 +122,7 @@ sys.stderr = io.StringIO()
       {isRunning && (
         <RunningMessage>{t("Running...")}</RunningMessage>
       )}
-      
+
       {!isRunning && (output || error) && (
         <OutputContainer>
           {error && (
