@@ -88,6 +88,7 @@ export default function useDictionary() {
       sortAsc: t("Sort ascending"),
       sortDesc: t("Sort descending"),
       table: t("Table"),
+      tableOfContents: t("Table of Contents"),
       exportAsCSV: t("Export as CSV"),
       toggleHeader: t("Toggle header"),
       mathInline: t("Math inline (LaTeX)"),

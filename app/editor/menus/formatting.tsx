@@ -19,6 +19,9 @@ import {
   Heading3Icon,
   TableMergeCellsIcon,
   TableSplitCellsIcon,
+  AlignLeftIcon,
+  AlignCenterIcon,
+  AlignRightIcon,
 } from "outline-icons";
 import { EditorState } from "prosemirror-state";
 import styled from "styled-components";
@@ -54,6 +57,19 @@ export default function formattingMenuItems(
   const isMobile = isMobileDevice();
   const isTouch = isTouchDevice();
   const isTableCell = state.selection instanceof CellSelection;
+
+  // Check if cursor is in a heading
+  const isHeading = isNodeActive(schema.nodes.heading)(state);
+  let currentAlignment: string | null = null;
+  if (isHeading) {
+    state.doc.nodesBetween(state.selection.from, state.selection.to, (node) => {
+      if (node.type === schema.nodes.heading && currentAlignment === null) {
+        currentAlignment = node.attrs.textAlign || null;
+        return false;
+      }
+      return true;
+    });
+  }
 
   const highlight = getMarksBetween(
     state.selection.from,
@@ -110,14 +126,14 @@ export default function formattingMenuItems(
       children: [
         ...(highlight
           ? [
-              {
-                name: "highlight",
-                label: dictionary.none,
-                icon: <DottedCircleIcon retainColor color="transparent" />,
-                active: () => false,
-                attrs: { color: highlight.mark.attrs.color },
-              },
-            ]
+            {
+              name: "highlight",
+              label: dictionary.none,
+              icon: <DottedCircleIcon retainColor color="transparent" />,
+              active: () => false,
+              attrs: { color: highlight.mark.attrs.color },
+            },
+          ]
           : []),
         ...Highlight.colors.map((color, index) => ({
           name: "highlight",
@@ -166,6 +182,34 @@ export default function formattingMenuItems(
       active: isNodeActive(schema.nodes.heading, { level: 3 }),
       attrs: { level: 3 },
       visible: !isCodeBlock && (!isMobile || isEmpty),
+    },
+    {
+      name: "separator",
+      visible: isHeading,
+    },
+    {
+      name: "setHeadingAlignment",
+      tooltip: dictionary.alignLeft,
+      icon: <AlignLeftIcon />,
+      attrs: { alignment: null },
+      active: () => currentAlignment === null || currentAlignment === "left",
+      visible: isHeading,
+    },
+    {
+      name: "setHeadingAlignment",
+      tooltip: dictionary.alignCenter,
+      icon: <AlignCenterIcon />,
+      attrs: { alignment: "center" },
+      active: () => currentAlignment === "center",
+      visible: isHeading,
+    },
+    {
+      name: "setHeadingAlignment",
+      tooltip: dictionary.alignRight,
+      icon: <AlignRightIcon />,
+      attrs: { alignment: "right" },
+      active: () => currentAlignment === "right",
+      visible: isHeading,
     },
     {
       name: "blockquote",

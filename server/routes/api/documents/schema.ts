@@ -159,6 +159,15 @@ export const DocumentsExportSchema = BaseSchema.extend({
 
 export type DocumentsExportReq = z.infer<typeof DocumentsExportSchema>;
 
+export const DocumentsExportNestedSchema = BaseSchema.extend({
+  body: BaseIdSchema.extend({
+    /** Format for export (markdown, html, or pdf) */
+    format: z.enum(["markdown", "html", "pdf"]).optional().default("markdown"),
+  }),
+});
+
+export type DocumentsExportNestedReq = z.infer<typeof DocumentsExportNestedSchema>;
+
 export const DocumentsRestoreSchema = BaseSchema.extend({
   body: BaseIdSchema.extend({
     /** Id of the collection to which the document belongs */

@@ -535,25 +535,30 @@ export const downloadDocumentAsPDF = createActionV2({
   name: ({ t }) => t("PDF"),
   analyticsName: "Download document as PDF",
   section: ActiveDocumentSection,
-  keywords: "export",
+  keywords: "export pdf print",
   icon: <DownloadIcon />,
   iconInContextMenu: false,
   visible: ({ activeDocumentId, stores }) =>
     !!(
       activeDocumentId &&
-      stores.policies.abilities(activeDocumentId).download &&
-      env.PDF_EXPORT_ENABLED
+      stores.policies.abilities(activeDocumentId).download
     ),
-  perform: ({ activeDocumentId, t, stores }) => {
+  perform: async ({ activeDocumentId, stores, t }) => {
     if (!activeDocumentId) {
       return;
     }
 
-    const id = toast.loading(`${t("Exporting")}…`);
     const document = stores.documents.get(activeDocumentId);
-    return document
-      ?.download(ExportContentType.Pdf)
-      .finally(() => id && toast.dismiss(id));
+    if (!document) {
+      return;
+    }
+
+    const id = toast.loading(`${t("Exporting")}…`);
+    try {
+      await document.download(ExportContentType.Pdf);
+    } finally {
+      toast.dismiss(id);
+    }
   },
 });
 
@@ -576,6 +581,45 @@ export const downloadDocumentAsMarkdown = createActionV2({
   },
 });
 
+export const downloadDocumentNested = createActionV2({
+  name: ({ t }) => t("Download with nested documents"),
+  analyticsName: "Download document nested",
+  section: ActiveDocumentSection,
+  keywords: "export nested children subdocuments",
+  icon: <DownloadIcon />,
+  iconInContextMenu: false,
+  visible: ({ activeDocumentId, stores }) => {
+    if (!activeDocumentId) {
+      return false;
+    }
+    const document = stores.documents.get(activeDocumentId);
+    return !!(
+      document &&
+      stores.policies.abilities(activeDocumentId).download &&
+      document.childDocuments.length > 0
+    );
+  },
+  perform: async ({ activeDocumentId, stores, t }) => {
+    if (!activeDocumentId) {
+      return;
+    }
+
+    const ExportNestedDialog = (
+      await import("~/components/ExportNestedDialog")
+    ).default;
+
+    stores.dialogs.openModal({
+      title: t("Export with nested documents"),
+      content: (
+        <ExportNestedDialog
+          documentId={activeDocumentId}
+          onRequestClose={stores.dialogs.closeAllModals}
+        />
+      ),
+    });
+  },
+});
+
 export const downloadDocument = createActionV2WithChildren({
   name: ({ t, isMenu }) => (isMenu ? t("Download") : t("Download document")),
   analyticsName: "Download document",
@@ -588,6 +632,7 @@ export const downloadDocument = createActionV2WithChildren({
     downloadDocumentAsHTML,
     downloadDocumentAsPDF,
     downloadDocumentAsMarkdown,
+    downloadDocumentNested,
   ],
 });
 

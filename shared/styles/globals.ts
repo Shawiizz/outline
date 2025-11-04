@@ -24,12 +24,41 @@ export default createGlobalStyle<Props>`
     --pointer: ${(props) => (props.useCursorPointer ? "pointer" : "default")};
     overscroll-behavior-x: none;
 
-    @media print {
-      background: none !important;
-    }
+  @media print {
+    background: none !important;
   }
 
-  body,
+  body.pdf-export {
+    @media print {
+      margin: 0;
+      padding: 0;
+
+      /* Optimize page breaks */
+      h1, h2, h3, h4, h5, h6 {
+        page-break-after: avoid;
+        break-after: avoid;
+      }
+
+      p, blockquote, pre, ul, ol, dl, figure, table {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      /* Ensure links are visible */
+      a {
+        text-decoration: underline;
+        color: inherit;
+      }
+
+      /* Optimize image rendering */
+      img {
+        max-width: 100% !important;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+    }
+  }
+}  body,
   button,
   input,
   optgroup,

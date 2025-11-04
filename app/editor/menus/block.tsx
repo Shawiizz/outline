@@ -10,6 +10,7 @@ import {
   OrderedListIcon,
   PageBreakIcon,
   TableIcon,
+  TableOfContentsIcon,
   TodoListIcon,
   ImageIcon,
   StarredIcon,
@@ -149,6 +150,12 @@ export default function blockMenuItems(
       title: dictionary.mathBlock,
       icon: <MathIcon />,
       keywords: "math katex latex",
+    },
+    {
+      name: "table_of_contents",
+      title: dictionary.tableOfContents,
+      icon: <TableOfContentsIcon />,
+      keywords: "toc contents sommaire index",
     },
     {
       name: "hr",

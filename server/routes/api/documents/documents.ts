@@ -156,8 +156,8 @@ router.post(
         collectionId:
           template && can(user, "readTemplate", user.team)
             ? {
-                [Op.or]: [{ [Op.in]: collectionIds }, { [Op.is]: null }],
-              }
+              [Op.or]: [{ [Op.in]: collectionIds }, { [Op.is]: null }],
+            }
             : collectionIds,
       });
     }
@@ -622,8 +622,8 @@ router.post(
       data:
         apiVersion >= 2
           ? {
-              document: serializedDocument,
-            }
+            document: serializedDocument,
+          }
           : serializedDocument,
       policies: isPublic ? undefined : presentPolicies(user, [document]),
     };
@@ -669,10 +669,10 @@ router.post(
         },
         collection?.permission
           ? {
-              role: {
-                [Op.ne]: UserRole.Guest,
-              },
-            }
+            role: {
+              [Op.ne]: UserRole.Guest,
+            },
+          }
           : {},
       ],
     };
@@ -767,9 +767,18 @@ router.post(
         includeMermaid: true,
       });
     } else if (accept?.includes("application/pdf")) {
-      throw IncorrectEditionError(
-        "PDF export is not available in the community edition"
+      const { PdfGenerator } = await import("@server/utils/PdfGenerator");
+      const pdfBuffer = await PdfGenerator.generatePDF(document);
+
+      ctx.set("Content-Type", "application/pdf");
+      ctx.set(
+        "Content-Disposition",
+        contentDisposition(`${slugify(document.titleWithDefault)}.pdf`, {
+          type: "attachment",
+        })
       );
+      ctx.body = pdfBuffer;
+      return;
     } else if (accept?.includes("text/markdown")) {
       contentType = "text/markdown";
       content = DocumentHelper.toMarkdown(document);
@@ -791,11 +800,11 @@ router.post(
     );
     const attachments = attachmentIds.length
       ? await Attachment.findAll({
-          where: {
-            teamId: document.teamId,
-            id: attachmentIds,
-          },
-        })
+        where: {
+          teamId: document.teamId,
+          id: attachmentIds,
+        },
+      })
       : [];
 
     if (attachments.length === 0) {
@@ -859,6 +868,98 @@ router.post(
 );
 
 router.post(
+  "documents.export_nested",
+  rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
+  auth({ role: UserRole.Member }),
+  validate(T.DocumentsExportNestedSchema),
+  async (ctx: APIContext<T.DocumentsExportNestedReq>) => {
+    const { id, format } = ctx.input.body;
+    const { user } = ctx.state.auth;
+
+    const document = await documentLoader({
+      id,
+      user,
+      includeState: format !== "markdown",
+    });
+
+    const zip = new JSZip();
+
+    // Helper to build path based on document hierarchy
+    const documentPaths = new Map<string, string>();
+
+    const buildDocumentPath = async (
+      doc: Document,
+      parentPath: string = ""
+    ): Promise<void> => {
+      const fileName = slugify(doc.titleWithDefault);
+      const currentPath = parentPath ? `${parentPath}/${fileName}` : fileName;
+      documentPaths.set(doc.id, currentPath);
+
+      // Get direct children
+      const children = await Document.findAll({
+        where: {
+          parentDocumentId: doc.id,
+          teamId: user.teamId,
+        },
+        paranoid: true,
+      });
+
+      for (const child of children) {
+        await buildDocumentPath(child, currentPath);
+      }
+    };
+
+    // Build the document tree structure
+    await buildDocumentPath(document);
+
+    // Export each document based on format
+    const extension = format === "pdf" ? "pdf" : format === "html" ? "html" : "md";
+
+    for (const [docId, docPath] of documentPaths) {
+      const doc = docId === document.id
+        ? document
+        : await Document.findByPk(docId, { paranoid: true });
+
+      if (!doc) continue;
+
+      const filePath = `${docPath}.${extension}`;
+
+      if (format === "pdf") {
+        const { PdfGenerator } = await import("@server/utils/PdfGenerator");
+        const pdfBuffer = await PdfGenerator.generatePDF(doc);
+        zip.file(filePath, pdfBuffer, {
+          date: doc.updatedAt,
+        });
+      } else if (format === "html") {
+        const html = await DocumentHelper.toHTML(doc, {
+          centered: true,
+          includeMermaid: true,
+        });
+        zip.file(filePath, html, {
+          date: doc.updatedAt,
+        });
+      } else {
+        // markdown (default)
+        const markdown = DocumentHelper.toMarkdown(doc);
+        zip.file(filePath, markdown, {
+          date: doc.updatedAt,
+        });
+      }
+    }
+
+    const zipFileName = slugify(document.titleWithDefault);
+    ctx.set("Content-Type", "application/zip");
+    ctx.set(
+      "Content-Disposition",
+      contentDisposition(`${zipFileName}-nested.zip`, {
+        type: "attachment",
+      })
+    );
+    ctx.body = zip.generateNodeStream(ZipHelper.defaultStreamOptions);
+  }
+);
+
+router.post(
   "documents.restore",
   auth({ role: UserRole.Member }),
   validate(T.DocumentsRestoreSchema),
@@ -879,19 +980,19 @@ router.post(
 
     const srcCollection = sourceCollectionId
       ? await Collection.findByPk(sourceCollectionId, {
-          userId: user.id,
-          includeDocumentStructure: true,
-          paranoid: false,
-          transaction,
-        })
+        userId: user.id,
+        includeDocumentStructure: true,
+        paranoid: false,
+        transaction,
+      })
       : undefined;
 
     const destCollection = destCollectionId
       ? await Collection.findByPk(destCollectionId, {
-          userId: user.id,
-          includeDocumentStructure: true,
-          transaction,
-        })
+        userId: user.id,
+        includeDocumentStructure: true,
+        transaction,
+      })
       : undefined;
 
     // In case of workspace templates, both source and destination collections are undefined.
@@ -1341,9 +1442,9 @@ router.post(
 
     const collection = collectionId
       ? await Collection.findByPk(collectionId, {
-          userId: user.id,
-          transaction,
-        })
+        userId: user.id,
+        transaction,
+      })
       : document?.collection;
 
     if (collection) {
@@ -2146,11 +2247,11 @@ router.post(
 function getAPIVersion(ctx: APIContext) {
   return Number(
     ctx.headers["x-api-version"] ??
-      (typeof ctx.input.body === "object" &&
-        ctx.input.body &&
-        "apiVersion" in ctx.input.body &&
-        ctx.input.body.apiVersion) ??
-      0
+    (typeof ctx.input.body === "object" &&
+      ctx.input.body &&
+      "apiVersion" in ctx.input.body &&
+      ctx.input.body.apiVersion) ??
+    0
   );
 }
 

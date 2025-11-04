@@ -390,6 +390,7 @@ width: 100%;
   h4,
   h5,
   h6 {
+    position: relative;
     margin-top: 1em;
     margin-bottom: 0.25em;
     line-height: inherit;
@@ -405,20 +406,22 @@ width: 100%;
     &:not(.placeholder) {
       &::before {
         display: none;
+        position: absolute;
+        left: -24px;
+        top: 0;
         font-family: ${props.theme.fontFamilyMono};
         color: ${props.theme.textSecondary};
         font-size: 13px;
         font-weight: 500;
-        line-height: 0;
-        margin-left: -24px;
+        line-height: inherit;
         transition: opacity 150ms ease-in-out;
         opacity: 0;
         width: 24px;
       }
 
       &:dir(rtl)::before {
-        margin-left: 0;
-        margin-right: -24px;
+        left: auto;
+        right: -24px;
       }
     }
 
@@ -627,8 +630,7 @@ iframe.embed {
 }
 
 .${EditorStyleHelper.tableFullWidth} {
-  transform: translateX(calc(50% + ${
-    EditorStyleHelper.padding
+  transform: translateX(calc(50% + ${EditorStyleHelper.padding
   }px + var(--container-width) * -0.5 + var(--full-width-transform-offset)));
 
   .${EditorStyleHelper.tableScrollable},
@@ -861,17 +863,17 @@ h6:not(.placeholder)::before {
   opacity: 0;
   user-select: none;
   background: ${props.theme.background};
-  margin-left: -26px;
   flex-direction: row;
   display: none;
-  position: relative;
-  top: -2px;
+  position: absolute;
+  left: -26px;
+  top: 0;
   width: 26px;
   height: 24px;
 
   &:dir(rtl) {
-    margin-left: 0;
-    margin-right: -26px;
+    left: auto;
+    right: -26px;
   }
 
   &.collapsed {
@@ -955,13 +957,11 @@ h6 {
   opacity: 1;
 }
 
-${
-  props.commenting
+${props.commenting
     ? `
 .${EditorStyleHelper.comment} {
-  &:not([data-resolved]):not([data-draft]), &[data-draft][data-user-id="${
-    props.userId ?? ""
-  }"]  {
+  &:not([data-resolved]):not([data-draft]), &[data-draft][data-user-id="${props.userId ?? ""
+    }"]  {
     border-bottom: 2px solid ${props.theme.commentMarkBackground};
     transition: background 100ms ease-in-out;
     border-radius: 2px;
@@ -979,7 +979,7 @@ ${
   border: none !important;
 }
 `
-}
+  }
 
 .notice-block {
   display: flex;
@@ -1064,6 +1064,49 @@ ${
 
   a {
     color: ${props.theme.noticeSuccessText};
+  }
+}
+
+.table-of-contents-block {
+  display: flex;
+  align-items: center;
+  background: ${transparentize(0.95, props.theme.accent)};
+  border: 2px dashed ${transparentize(0.5, props.theme.accent)};
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+  cursor: pointer;
+  transition: all 150ms ease-in-out;
+
+  &:hover {
+    background: ${transparentize(0.92, props.theme.accent)};
+    border-color: ${props.theme.accent};
+  }
+
+  &.ProseMirror-selectednode {
+    background: ${transparentize(0.9, props.theme.accent)};
+    border-color: ${props.theme.accent};
+    border-style: solid;
+  }
+
+  .toc-icon-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .toc-icon {
+    color: ${props.theme.accent};
+    display: flex;
+    align-items: center;
+  }
+
+  .toc-label {
+    font-size: 15px;
+    font-weight: 500;
+    color: ${props.theme.text};
   }
 }
 
@@ -1277,9 +1320,8 @@ ul.checkbox_list {
   .checkbox {
     display: inline-block;
     cursor: var(--pointer);
-    pointer-events: ${
-      props.readOnly && !props.readOnlyWriteCheckboxes ? "none" : "initial"
-    };
+    pointer-events: ${props.readOnly && !props.readOnlyWriteCheckboxes ? "none" : "initial"
+  };
     opacity: ${props.readOnly && !props.readOnlyWriteCheckboxes ? 0.75 : 1};
     width: 14px;
     height: 14px;
@@ -1290,17 +1332,17 @@ ul.checkbox_list {
     margin: 0 0.5em 0 0;
 
     background-image: ${`url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M3 0C1.34315 0 0 1.34315 0 3V11C0 12.6569 1.34315 14 3 14H11C12.6569 14 14 12.6569 14 11V3C14 1.34315 12.6569 0 11 0H3ZM3 2C2.44772 2 2 2.44772 2 3V11C2 11.5523 2.44772 12 3 12H11C11.5523 12 12 11.5523 12 11V3C12 2.44772 11.5523 2 11 2H3Z' fill='${props.theme.text.replace(
-      "#",
-      "%23"
-    )}' /%3E%3C/svg%3E%0A");`}
+    "#",
+    "%23"
+  )}' /%3E%3C/svg%3E%0A");`}
 
     &[aria-checked=true] {
         opacity: 1;
         background-image: ${`url(
             "data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M3 0C1.34315 0 0 1.34315 0 3V11C0 12.6569 1.34315 14 3 14H11C12.6569 14 14 12.6569 14 11V3C14 1.34315 12.6569 0 11 0H3ZM4.26825 5.85982L5.95873 7.88839L9.70003 2.9C10.0314 2.45817 10.6582 2.36863 11.1 2.7C11.5419 3.03137 11.6314 3.65817 11.3 4.1L6.80002 10.1C6.41275 10.6164 5.64501 10.636 5.2318 10.1402L2.7318 7.14018C2.37824 6.71591 2.43556 6.08534 2.85984 5.73178C3.28412 5.37821 3.91468 5.43554 4.26825 5.85982Z' fill='${props.theme.accent.replace(
-              "#",
-              "%23"
-            )}' /%3E%3C/svg%3E%0A"
+    "#",
+    "%23"
+  )}' /%3E%3C/svg%3E%0A"
         )`};
     }
 
@@ -1397,9 +1439,8 @@ mark {
 .code-block[data-language=mermaidjs] {
   margin: 0.75em 0;
 
-  ${
-    !props.staticHTML &&
-    css`
+  ${!props.staticHTML &&
+  css`
       pre {
         border-bottom-left-radius: 0;
         border-bottom-right-radius: 0;
@@ -1581,9 +1622,8 @@ table {
   }
 
   .selectedCell {
-    background: ${
-      props.readOnly ? "inherit" : props.theme.tableSelectedBackground
-    };
+    background: ${props.readOnly ? "inherit" : props.theme.tableSelectedBackground
+  };
 
     /* fixes Firefox background color painting over border:
      * https://bugzilla.mozilla.org/show_bug.cgi?id=688556 */
@@ -1615,8 +1655,8 @@ table {
       background-size: 16px 16px;
       background-position: 50% 50%;
       background-image: url("data:image/svg+xml;base64,${btoa(
-        '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 5C11.4477 5 11 5.44772 11 6V11H6C5.44772 11 5 11.4477 5 12C5 12.5523 5.44772 13 6 13H11V18C11 18.5523 11.4477 19 12 19C12.5523 19 13 18.5523 13 18V13H18C18.5523 13 19 12.5523 19 12C19 11.4477 18.5523 11 18 11H13V6C13 5.44772 12.5523 5 12 5Z" fill="white"/></svg>'
-      )}")
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 5C11.4477 5 11 5.44772 11 6V11H6C5.44772 11 5 11.4477 5 12C5 12.5523 5.44772 13 6 13H11V18C11 18.5523 11.4477 19 12 19C12.5523 19 13 18.5523 13 18V13H18C18.5523 13 19 12.5523 19 12C19 11.4477 18.5523 11 18 11H13V6C13 5.44772 12.5523 5 12 5Z" fill="white"/></svg>'
+  )}")
     }
 
     // extra clickable area
@@ -1826,9 +1866,8 @@ table {
   transition: border 250ms ease-in-out 0s;
 
   &:hover {
-    scrollbar-color: ${props.theme.scrollbarThumb} ${
-      props.theme.scrollbarBackground
-    };
+    scrollbar-color: ${props.theme.scrollbarThumb} ${props.theme.scrollbarBackground
+  };
   }
 
   & ::-webkit-scrollbar {
@@ -1869,8 +1908,7 @@ table {
 .${EditorStyleHelper.tableShadowLeft}::before {
   left: -${EditorStyleHelper.padding}px;
   right: auto;
-  box-shadow: 16px 0 16px -16px inset rgba(0, 0, 0, ${
-    props.theme.isDark ? 1 : 0.25
+  box-shadow: 16px 0 16px -16px inset rgba(0, 0, 0, ${props.theme.isDark ? 1 : 0.25
   });
   border-left: ${EditorStyleHelper.padding}px solid ${props.theme.background};
 }
@@ -1878,8 +1916,7 @@ table {
 .${EditorStyleHelper.tableShadowRight}::after {
   right: -${EditorStyleHelper.padding}px;
   left: auto;
-  box-shadow: -16px 0 16px -16px inset rgba(0, 0, 0, ${
-    props.theme.isDark ? 1 : 0.25
+  box-shadow: -16px 0 16px -16px inset rgba(0, 0, 0, ${props.theme.isDark ? 1 : 0.25
   });
   border-right: ${EditorStyleHelper.padding}px solid ${props.theme.background};
 }
@@ -1983,6 +2020,10 @@ del[data-operation-index] {
   h5:not(.placeholder)::before,
   h6:not(.placeholder)::before {
     display: none;
+  }
+
+  .table-of-contents-block {
+    display: none !important;
   }
 
   .image {

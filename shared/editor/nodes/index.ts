@@ -40,6 +40,7 @@ import Table from "./Table";
 import TableCell from "./TableCell";
 import TableHeader from "./TableHeader";
 import TableRow from "./TableRow";
+import TableOfContents from "./TableOfContents";
 import Text from "./Text";
 import Video from "./Video";
 
@@ -106,6 +107,7 @@ export const richExtensions: Nodes = [
   Math,
   MathBlock,
   Mention,
+  TableOfContents,
   // Container type nodes should be last so that key handlers are registered for content inside
   // the container nodes first.
   ...listExtensions,

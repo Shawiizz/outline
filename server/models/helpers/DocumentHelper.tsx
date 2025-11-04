@@ -176,9 +176,8 @@ export class DocumentHelper {
     ) {
       const iconType = determineIconType(document.icon);
 
-      const title = `${iconType === IconType.Emoji ? document.icon + " " : ""}${
-        document.title
-      }`;
+      const title = `${iconType === IconType.Emoji ? document.icon + " " : ""}${document.title
+        }`;
 
       return `# ${title}\n\n${text}`;
     }
@@ -235,7 +234,133 @@ export class DocumentHelper {
       );
     }
 
+    // Replace TOC placeholders with actual generated table of contents
+    output = DocumentHelper.injectTableOfContents(output);
+
     return output;
+  }
+
+  /**
+   * Injects a generated table of contents into the HTML output wherever
+   * a TOC placeholder block exists.
+   *
+   * @param html The HTML string to process
+   * @returns HTML with TOC placeholders replaced by actual table of contents
+   */
+  static injectTableOfContents(html: string): string {
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+
+    // Find all TOC placeholder blocks
+    const tocPlaceholders = doc.querySelectorAll(".table-of-contents-block");
+
+    if (tocPlaceholders.length === 0) {
+      return html;
+    }
+
+    // Find all headings in the document
+    const allHeadings = doc.querySelectorAll("h1, h2, h3, h4, h5, h6");
+
+    tocPlaceholders.forEach((placeholder) => {
+      const maxLevel = parseInt(
+        (placeholder as HTMLElement).dataset.maxLevel || "3",
+        10
+      );
+
+      // Build the TOC HTML
+      const tocHTML = DocumentHelper.generateTOCHTML(allHeadings, maxLevel);
+
+      // Replace placeholder with generated TOC
+      const tocContainer = doc.createElement("div");
+      tocContainer.className = "document-toc";
+      tocContainer.innerHTML = tocHTML;
+      placeholder.parentNode?.replaceChild(tocContainer, placeholder);
+    });
+
+    return dom.serialize();
+  }
+
+  /**
+   * Generates the HTML for a table of contents based on headings
+   *
+   * @param headings NodeList of heading elements
+   * @param maxLevel Maximum heading level to include (1-6)
+   * @returns HTML string for the table of contents
+   */
+  private static generateTOCHTML(
+    headings: NodeListOf<Element>,
+    maxLevel: number
+  ): string {
+    if (headings.length === 0) {
+      return '<p style="color: #888; font-style: italic;">Aucun titre trouvé dans le document</p>';
+    }
+
+    const tocItems: Array<{ level: number; text: string; id: string }> = [];
+
+    headings.forEach((heading, index) => {
+      const level = parseInt(heading.tagName.substring(1), 10);
+
+      if (level <= maxLevel) {
+        const text = heading.textContent?.trim() || "";
+
+        if (text) {
+          // Get or generate an ID for the heading
+          let id = (heading as HTMLElement).id;
+
+          if (!id) {
+            // Generate an ID from the text content
+            id = text
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-|-$/g, "");
+
+            // Add index if ID is empty or ensure uniqueness
+            if (!id) {
+              id = `heading-${index}`;
+            }
+
+            // Set the ID on the heading element so links will work
+            (heading as HTMLElement).id = id;
+          }
+
+          tocItems.push({ level, text, id });
+        }
+      }
+    });
+
+    if (tocItems.length === 0) {
+      return '<p style="color: #888; font-style: italic;">Aucun titre trouvé dans le document</p>';
+    }
+
+    // Find minimum level to normalize indentation
+    const minLevel = Math.min(...tocItems.map((item) => item.level));
+
+    const navStyle = "border: 1px solid #d0d7de; border-radius: 6px; padding: 16px 20px; margin: 20px 0; background-color: #f6f8fa;";
+    const h3Style = "margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #24292f; border-bottom: 1px solid #d0d7de; padding-bottom: 8px;";
+    const olStyle = "margin: 8px 0 0 0; padding: 0; list-style: none;";
+
+    let html = `<nav style="${navStyle}"><h3 style="${h3Style}">Table des matières</h3><ol style="${olStyle}">`;
+
+    tocItems.forEach((item) => {
+      const adjustedLevel = item.level - minLevel;
+      const indent = adjustedLevel * 24;
+
+      // Font size decreases with heading level
+      const fontSize = 14 - adjustedLevel;
+
+      // Wrapper style for the dotted leader
+      const liStyle = `margin: 0 0 6px ${indent}px; padding: 0;`;
+      const linkStyle = "display: flex; align-items: baseline; text-decoration: none; color: inherit;";
+      const textStyle = `flex: 0 0 auto; color: #24292f; font-size: ${fontSize}px; font-weight: ${adjustedLevel === 0 ? '500' : '400'}; background: #f6f8fa; padding-right: 6px;`;
+      const dotsStyle = "flex: 1 1 auto; border-bottom: 1px dotted #d0d7de; height: 1em; margin: 0 6px;";
+      const pageStyle = "flex: 0 0 auto; color: #24292f; font-size: 12px; background: #f6f8fa; padding-left: 6px;";
+
+      html += `<li style="${liStyle}"><a href="#${item.id}" class="document-toc" style="${linkStyle}"><span style="${textStyle}">${item.text}</span><span style="${dotsStyle}"></span><span class="toc-page-number" style="${pageStyle}">↓</span></a></li>`;
+    });
+
+    html += `</ol></nav>`;
+
+    return html;
   }
 
   /**
