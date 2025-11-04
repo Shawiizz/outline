@@ -873,7 +873,7 @@ router.post(
   auth({ role: UserRole.Member }),
   validate(T.DocumentsExportNestedSchema),
   async (ctx: APIContext<T.DocumentsExportNestedReq>) => {
-    const { id, format } = ctx.input.body;
+    const { id, format, documentIds } = ctx.input.body;
     const { user } = ctx.state.auth;
 
     const document = await documentLoader({
@@ -886,11 +886,17 @@ router.post(
 
     // Helper to build path based on document hierarchy
     const documentPaths = new Map<string, string>();
+    const selectedIds = documentIds ? new Set(documentIds) : null;
 
     const buildDocumentPath = async (
       doc: Document,
       parentPath: string = ""
     ): Promise<void> => {
+      // Si une liste de sélection est fournie et que ce document n'est pas dedans, on l'ignore
+      if (selectedIds && !selectedIds.has(doc.id)) {
+        return;
+      }
+
       const fileName = slugify(doc.titleWithDefault);
       const currentPath = parentPath ? `${parentPath}/${fileName}` : fileName;
       documentPaths.set(doc.id, currentPath);
