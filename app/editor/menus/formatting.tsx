@@ -58,12 +58,14 @@ export default function formattingMenuItems(
   const isTouch = isTouchDevice();
   const isTableCell = state.selection instanceof CellSelection;
 
-  // Check if cursor is in a heading
+  // Check if cursor is in a heading or paragraph
   const isHeading = isNodeActive(schema.nodes.heading)(state);
+  const isParagraph = isNodeActive(schema.nodes.paragraph)(state);
+  const canAlign = isHeading || isParagraph;
   let currentAlignment: string | null = null;
-  if (isHeading) {
+  if (canAlign) {
     state.doc.nodesBetween(state.selection.from, state.selection.to, (node) => {
-      if (node.type === schema.nodes.heading && currentAlignment === null) {
+      if ((node.type === schema.nodes.heading || node.type === schema.nodes.paragraph) && currentAlignment === null) {
         currentAlignment = node.attrs.textAlign || null;
         return false;
       }
@@ -185,31 +187,31 @@ export default function formattingMenuItems(
     },
     {
       name: "separator",
-      visible: isHeading,
+      visible: canAlign,
     },
     {
-      name: "setHeadingAlignment",
+      name: isHeading ? "setHeadingAlignment" : "setParagraphAlignment",
       tooltip: dictionary.alignLeft,
       icon: <AlignLeftIcon />,
       attrs: { alignment: null },
       active: () => currentAlignment === null || currentAlignment === "left",
-      visible: isHeading,
+      visible: canAlign,
     },
     {
-      name: "setHeadingAlignment",
+      name: isHeading ? "setHeadingAlignment" : "setParagraphAlignment",
       tooltip: dictionary.alignCenter,
       icon: <AlignCenterIcon />,
       attrs: { alignment: "center" },
       active: () => currentAlignment === "center",
-      visible: isHeading,
+      visible: canAlign,
     },
     {
-      name: "setHeadingAlignment",
+      name: isHeading ? "setHeadingAlignment" : "setParagraphAlignment",
       tooltip: dictionary.alignRight,
       icon: <AlignRightIcon />,
       attrs: { alignment: "right" },
       active: () => currentAlignment === "right",
-      visible: isHeading,
+      visible: canAlign,
     },
     {
       name: "blockquote",

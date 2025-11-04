@@ -1,6 +1,7 @@
 import { setBlockType } from "prosemirror-commands";
 import { NodeSpec, NodeType, Node as ProsemirrorNode } from "prosemirror-model";
 import deleteEmptyFirstParagraph from "../commands/deleteEmptyFirstParagraph";
+import setParagraphAlignment from "../commands/setParagraphAlignment";
 import { MarkdownSerializerState } from "../lib/markdown/serializer";
 import Node from "./Node";
 import { EditorStyleHelper } from "../styles/EditorStyleHelper";
@@ -12,6 +13,11 @@ export default class Paragraph extends Node {
 
   get schema(): NodeSpec {
     return {
+      attrs: {
+        textAlign: {
+          default: null,
+        },
+      },
       content: "inline*",
       group: "block",
       parseDOM: [
@@ -27,11 +33,23 @@ export default class Paragraph extends Node {
               return false;
             }
 
-            return {};
+            return {
+              textAlign: dom.style.textAlign || null,
+            };
           },
         },
       ],
-      toDOM: () => ["p", { dir: "auto" }, 0],
+      toDOM: (node) => {
+        const attrs: Record<string, any> = {
+          dir: "auto",
+        };
+
+        if (node.attrs.textAlign) {
+          attrs.style = `text-align: ${node.attrs.textAlign}`;
+        }
+
+        return ["p", attrs, 0];
+      },
     };
   }
 
@@ -43,7 +61,11 @@ export default class Paragraph extends Node {
   }
 
   commands({ type }: { type: NodeType }) {
-    return () => setBlockType(type);
+    return {
+      paragraph: () => setBlockType(type),
+      setParagraphAlignment: ({ alignment }: { alignment: "left" | "center" | "right" | null }) =>
+        setParagraphAlignment(alignment),
+    };
   }
 
   toMarkdown(state: MarkdownSerializerState, node: ProsemirrorNode) {
