@@ -5,133 +5,137 @@ import Document from "@server/models/Document";
 
 @trace()
 export class PdfGenerator {
-    /**
-     * Generate a PDF from a document using Puppeteer
-     * @param document The document to convert to PDF
-     * @returns Buffer containing the PDF data
-     */
-    public static async generatePDF(document: Document): Promise<Buffer> {
-        let puppeteer;
+  /**
+   * Generate a PDF from a document using Puppeteer
+   * @param document The document to convert to PDF
+   * @returns Buffer containing the PDF data
+   */
+  public static async generatePDF(document: Document): Promise<Buffer> {
+    let puppeteer;
 
-        try {
-            // Import puppeteer dynamically to avoid issues if not installed
-            puppeteer = require("puppeteer");
-        } catch (error) {
-            throw new Error(
-                "Puppeteer is not installed. Run: npm install puppeteer"
-            );
-        }
+    try {
+      // Import puppeteer dynamically to avoid issues if not installed
+      puppeteer = require("puppeteer");
+    } catch (error) {
+      throw new Error(
+        "Puppeteer is not installed. Run: npm install puppeteer"
+      );
+    }
 
-        // Generate HTML from the document
-        const html = await DocumentHelper.toHTML(document, {
-            centered: true,
-            includeMermaid: true,
-        });
+    // Generate HTML from the document
+    const html = await DocumentHelper.toHTML(document, {
+      centered: true,
+      includeMermaid: true,
+    });
 
-        // Launch browser in headless mode
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        });
+    // Launch browser in headless mode
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
 
-        try {
-            const page = await browser.newPage();
+    try {
+      const page = await browser.newPage();
 
-            // Set content with full HTML
-            await page.setContent(this.wrapHtmlForPdf(html), {
-                waitUntil: "networkidle0",
-            });
+      // Set content with full HTML
+      await page.setContent(this.wrapHtmlForPdf(html), {
+        waitUntil: "networkidle0",
+      });
 
-            // Calculate page numbers for each heading
-            await this.injectPageNumbers(page);
+      // Calculate page numbers for each heading
+      await this.injectPageNumbers(page);
 
-            // Generate PDF with specific options
-            const pdfOptions: PDFOptions = {
-                format: "A4",
-                printBackground: true,
-                displayHeaderFooter: true,
-                headerTemplate: '<div></div>',
-                footerTemplate: `
-                    <div style="width: 100%; font-size: 11px; padding: 0 15mm 0 0; margin: 0; box-sizing: border-box;">
+      // Generate PDF with specific options
+      const pdfOptions: PDFOptions = {
+        format: "A4",
+        printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate: '<div style="width: 100%; font-size: 1px; padding: 0; margin: 0;">&nbsp;</div>',
+        footerTemplate: `
+                    <div style="width: 100%; font-size: 14px; padding: 0 15mm 0 0; margin: 0; box-sizing: border-box;">
                         <div style="text-align: right; color: #6b7280;">
-                            <span class="pageNumber"></span>
+                            <span class="pageNumber"></span> / <span class="totalPages"></span>
                         </div>
                     </div>
                 `,
-                margin: {
-                    top: "25mm",
-                    right: "20mm",
-                    bottom: "25mm",
-                    left: "20mm",
-                },
-            };
+        margin: {
+          top: "7mm",
+          right: "0mm",
+          bottom: "25mm",
+          left: "0mm",
+        },
+      };
 
-            const pdfBuffer = await page.pdf(pdfOptions);
+      const pdfBuffer = await page.pdf(pdfOptions);
 
-            return Buffer.from(pdfBuffer);
-        } finally {
-            await browser.close();
+      return Buffer.from(pdfBuffer);
+    } finally {
+      await browser.close();
+    }
+  }
+
+  /**
+   * Inject real page numbers into the table of contents
+   */
+  private static async injectPageNumbers(page: any): Promise<void> {
+    await page.evaluate(() => {
+      // Get all TOC links
+      const tocLinks = document.querySelectorAll('.document-toc a');
+
+      if (tocLinks.length === 0) {
+        return;
+      }
+
+      // Page dimensions (A4 with margins)
+      const pageHeight = 297 - 25 - 25; // A4 height minus top/bottom margins in mm
+      const mmToPx = 3.7795; // Conversion factor
+      const pageHeightPx = pageHeight * mmToPx;
+
+      tocLinks.forEach((link: any) => {
+        const href = link.getAttribute('href');
+        if (!href || !href.startsWith('#')) {
+          return;
         }
-    }
 
-    /**
-     * Inject real page numbers into the table of contents
-     */
-    private static async injectPageNumbers(page: any): Promise<void> {
-        await page.evaluate(() => {
-            // Get all TOC links
-            const tocLinks = document.querySelectorAll('.document-toc a');
+        const targetId = href.substring(1);
+        const targetElement = document.getElementById(targetId);
 
-            if (tocLinks.length === 0) {
-                return;
-            }
+        if (targetElement) {
+          // Calculate which page this element is on
+          const elementTop = targetElement.getBoundingClientRect().top + window.scrollY;
+          const pageNumber = Math.floor(elementTop / pageHeightPx) + 1;
 
-            // Page dimensions (A4 with margins)
-            const pageHeight = 297 - 25 - 25; // A4 height minus top/bottom margins in mm
-            const mmToPx = 3.7795; // Conversion factor
-            const pageHeightPx = pageHeight * mmToPx;
+          // Find the page number span in this link
+          const pageSpan = link.querySelector('.toc-page-number');
+          if (pageSpan) {
+            pageSpan.textContent = pageNumber.toString();
+          }
+        }
+      });
+    });
+  }
 
-            tocLinks.forEach((link: any) => {
-                const href = link.getAttribute('href');
-                if (!href || !href.startsWith('#')) {
-                    return;
-                }
-
-                const targetId = href.substring(1);
-                const targetElement = document.getElementById(targetId);
-
-                if (targetElement) {
-                    // Calculate which page this element is on
-                    const elementTop = targetElement.getBoundingClientRect().top + window.scrollY;
-                    const pageNumber = Math.floor(elementTop / pageHeightPx) + 1;
-
-                    // Find the page number span in this link
-                    const pageSpan = link.querySelector('.toc-page-number');
-                    if (pageSpan) {
-                        pageSpan.textContent = pageNumber.toString();
-                    }
-                }
-            });
-        });
-    }
-
-    /**
-     * Wrap HTML content with proper styling for PDF export
-     */
-    private static wrapHtmlForPdf(content: string): string {
-        return `
+  /**
+   * Wrap HTML content with proper styling for PDF export
+   */
+  private static wrapHtmlForPdf(content: string): string {
+    return `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="UTF-8">
           <style>
             @page {
-              margin: 0;
+              margin: 7mm 20mm 25mm 20mm;
+            }
+            
+            @page :first {
+              margin: 0mm 20mm 25mm 20mm;
             }
             
             body {
@@ -243,5 +247,5 @@ export class PdfGenerator {
         </body>
       </html>
     `;
-    }
+  }
 }
