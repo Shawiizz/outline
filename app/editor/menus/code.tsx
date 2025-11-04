@@ -15,6 +15,7 @@ export default function codeMenuItems(
   dictionary: Dictionary
 ): MenuItem[] {
   const node = state.selection.$from.node();
+  const isPython = node.attrs.language === "python" || node.attrs.language === "py";
 
   const frequentLanguages = getFrequentCodeLanguages();
 
@@ -39,7 +40,7 @@ export default function codeMenuItems(
         ]
       : remainingLangMenuItems;
 
-  return [
+  const items: MenuItem[] = [
     {
       name: "copyToClipboard",
       icon: <CopyIcon />,
@@ -48,6 +49,22 @@ export default function codeMenuItems(
         : undefined,
       tooltip: dictionary.copy,
     },
+  ];
+
+  // Add Run button for Python code
+  if (isPython) {
+    items.push({
+      name: "runPython",
+      icon: (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5v14l11-7z" />
+        </svg>
+      ),
+      tooltip: "Run Code",
+    });
+  }
+
+  items.push(
     {
       name: "separator",
     },
@@ -57,8 +74,10 @@ export default function codeMenuItems(
       icon: <ExpandedIcon />,
       children: getLanguageMenuItems(),
       visible: !readOnly,
-    },
-  ];
+    }
+  );
+
+  return items;
 }
 
 const langToMenuItem = ({

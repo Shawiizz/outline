@@ -98,9 +98,8 @@ export default class CodeFence extends Node {
       toDOM: (node) => [
         "div",
         {
-          class: `code-block ${
-            this.showLineNumbers ? "with-line-numbers" : ""
-          }`,
+          class: `code-block ${this.showLineNumbers ? "with-line-numbers" : ""
+            }`,
           "data-language": node.attrs.language,
         },
         ["pre", ["code", { spellCheck: "false" }, 0]],
@@ -150,6 +149,28 @@ export default class CodeFence extends Node {
         }
 
         return false;
+      },
+      runPython: (): Command => (state) => {
+        const codeBlock = findParentNode(isCode)(state.selection);
+        
+        if (!codeBlock) {
+          return false;
+        }
+
+        const language = codeBlock.node.attrs.language;
+        if (language !== "python" && language !== "py") {
+          return false;
+        }
+
+        // Trigger custom event for Python execution with unique position
+        const event = new CustomEvent("runPythonCode", {
+          detail: {
+            pos: codeBlock.pos,
+          },
+        });
+        window.dispatchEvent(event);
+        
+        return true;
       },
     };
   }

@@ -1499,6 +1499,36 @@ mark {
   }
 }
 
+.code-block-wrapper {
+  position: relative;
+  margin: 0.75em 0;
+}
+
+.python-code-block-wrapper {
+  position: relative;
+
+  &:hover .python-run-button-container button {
+    opacity: 0.6;
+  }
+}
+
+.python-run-button-container {
+  position: absolute;
+  top: 4px;
+  right: 32px; /* Position à côté du bouton copy */
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.python-output-container {
+  margin: 8px 0;
+  user-select: none;
+}
+
+.code-runner-container {
+  margin-top: 0;
+}
+
 .mermaid-diagram-wrapper {
   display: flex;
   align-items: center;

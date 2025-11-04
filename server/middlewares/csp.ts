@@ -38,6 +38,9 @@ export default function createCSPMiddleware() {
     defaultSrc.push(env.CDN_URL);
   }
 
+  // Allow Pyodide CDN for Python code execution
+  scriptSrc.push("cdn.jsdelivr.net");
+
   return function cspMiddleware(ctx: Context, next: Next) {
     ctx.state.cspNonce = crypto.randomBytes(16).toString("hex");
 
@@ -51,6 +54,7 @@ export default function createCSPMiddleware() {
           env.DEVELOPMENT_UNSAFE_INLINE_CSP
             ? "'unsafe-inline'"
             : `'nonce-${ctx.state.cspNonce}'`,
+          "'wasm-unsafe-eval'", // Required for Pyodide WebAssembly
         ],
         mediaSrc: ["*", "data:", "blob:"],
         imgSrc: ["*", "data:", "blob:"],

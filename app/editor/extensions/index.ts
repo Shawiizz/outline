@@ -10,6 +10,7 @@ import Keys from "~/editor/extensions/Keys";
 import MentionMenuExtension from "~/editor/extensions/MentionMenu";
 import PasteHandler from "~/editor/extensions/PasteHandler";
 import PreventTab from "~/editor/extensions/PreventTab";
+import PythonRunnerExtension from "~/editor/extensions/PythonRunner";
 import SelectionToolbarExtension from "~/editor/extensions/SelectionToolbar";
 import SmartText from "~/editor/extensions/SmartText";
 
@@ -26,6 +27,7 @@ export const withUIExtensions = (nodes: Nodes) => [
   FindAndReplaceExtension,
   HoverPreviewsExtension,
   SelectionToolbarExtension,
+  PythonRunnerExtension,
   // Order these default key handlers last
   PreventTab,
   Keys,
