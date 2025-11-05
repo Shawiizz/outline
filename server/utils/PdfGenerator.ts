@@ -195,7 +195,7 @@ export class PdfGenerator {
         if (!codeElement) continue;
 
         const code = codeElement.textContent || '';
-        let language = block.getAttribute('data-language') || 'text';
+        let language = (block.getAttribute('data-language') || 'text').trim();
 
         // Map unsupported or invalid languages to 'text'
         // Shiki doesn't support 'none' or empty language
@@ -204,20 +204,41 @@ export class PdfGenerator {
         }
 
         // Use shiki to render syntax-highlighted HTML (without background)
-        const highlighted = await codeToHtml(code, {
-          lang: language,
-          theme: 'github-light',
-          transformers: [
-            {
-              pre(node) {
-                // Remove background from pre tag
-                if (node.properties.style) {
-                  node.properties.style = (node.properties.style as string).replace(/background-color:[^;]+;?/g, '');
+        // If the language is not supported, fall back to plain text
+        let highlighted: string;
+        try {
+          highlighted = await codeToHtml(code, {
+            lang: language,
+            theme: 'github-light',
+            transformers: [
+              {
+                pre(node) {
+                  // Remove background from pre tag
+                  if (node.properties.style) {
+                    node.properties.style = (node.properties.style as string).replace(/background-color:[^;]+;?/g, '');
+                  }
                 }
               }
-            }
-          ]
-        });
+            ]
+          });
+        } catch (langError) {
+          // Language not supported by Shiki, fall back to plain text
+          Logger.warn(`PDF: Shiki language '${language}' not supported, using plain text`, langError);
+          highlighted = await codeToHtml(code, {
+            lang: 'text',
+            theme: 'github-light',
+            transformers: [
+              {
+                pre(node) {
+                  // Remove background from pre tag
+                  if (node.properties.style) {
+                    node.properties.style = (node.properties.style as string).replace(/background-color:[^;]+;?/g, '');
+                  }
+                }
+              }
+            ]
+          });
+        }
 
         // Replace the entire code block with highlighted version
         const tempDiv = document.createElement('div');
