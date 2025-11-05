@@ -1,9 +1,5 @@
 import { NodeSpec, NodeType, Node as ProsemirrorNode } from "prosemirror-model";
-import {
-  splitListItem,
-  sinkListItem,
-  liftListItem,
-} from "prosemirror-schema-list";
+import { splitListItem } from "prosemirror-schema-list";
 import {
   Transaction,
   EditorState,
@@ -17,6 +13,7 @@ import { findParentNodeClosestToPos } from "../queries/findParentNode";
 import { getParentListItem } from "../queries/getParentListItem";
 import { isInList } from "../queries/isInList";
 import { isList } from "../queries/isList";
+import setListIndent from "../commands/setListIndent";
 import Node from "./Node";
 
 export default class ListItem extends Node {
@@ -201,18 +198,18 @@ export default class ListItem extends Node {
 
   commands({ type }: { type: NodeType }) {
     return {
-      indentList: () => sinkListItem(type),
-      outdentList: () => liftListItem(type),
+      indentList: () => setListIndent("increase"),
+      outdentList: () => setListIndent("decrease"),
     };
   }
 
   keys({ type }: { type: NodeType }): Record<string, Command> {
     return {
       Enter: splitListItem(type),
-      Tab: sinkListItem(type),
-      "Shift-Tab": liftListItem(type),
-      "Mod-]": sinkListItem(type),
-      "Mod-[": liftListItem(type),
+      Tab: setListIndent("increase"),
+      "Shift-Tab": setListIndent("decrease"),
+      "Mod-]": setListIndent("increase"),
+      "Mod-[": setListIndent("decrease"),
       "Shift-Enter": (state, dispatch) => {
         if (!isInList(state)) {
           return false;

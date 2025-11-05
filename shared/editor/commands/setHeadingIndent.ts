@@ -11,11 +11,22 @@ export default function setHeadingIndent(
 ): Command {
     return (state: EditorState, dispatch?: (tr: Transaction) => void) => {
         const { selection, schema } = state;
-        const { from, to } = selection;
+        const { from, to, $from } = selection;
         const headingType = schema.nodes.heading;
+        const listItemType = schema.nodes.list_item;
+        const checkboxItemType = schema.nodes.checkbox_item;
 
         if (!headingType) {
             return false;
+        }
+
+        // Check if we're inside a list item - if so, don't handle Tab
+        // Let the list item handle it instead
+        for (let depth = $from.depth; depth > 0; depth--) {
+            const node = $from.node(depth);
+            if (node.type === listItemType || node.type === checkboxItemType) {
+                return false;
+            }
         }
 
         let applicable = false;

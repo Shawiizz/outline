@@ -16,10 +16,37 @@ export default class BulletList extends Node {
 
   get schema(): NodeSpec {
     return {
+      attrs: {
+        indent: {
+          default: 0,
+        },
+      },
       content: "list_item+",
       group: "block list",
-      parseDOM: [{ tag: "ul" }],
-      toDOM: () => ["ul", 0],
+      parseDOM: [
+        {
+          tag: "ul",
+          getAttrs: (node: HTMLElement) => ({
+            indent: parseInt(node.getAttribute("data-indent") || "0", 10),
+          }),
+        },
+      ],
+      toDOM: (node) => {
+        const attrs: Record<string, any> = {};
+
+        // Add indent data attribute
+        if (node.attrs.indent) {
+          attrs["data-indent"] = node.attrs.indent;
+        }
+
+        // Build inline style for indentation
+        if (node.attrs.indent) {
+          const indentValue = node.attrs.indent * 2; // 2em per indent level
+          attrs.style = `margin-left: ${indentValue}em`;
+        }
+
+        return ["ul", attrs, 0];
+      },
     };
   }
 

@@ -27,6 +27,9 @@ export default class OrderedList extends Node {
           validate: (style: string) =>
             ["number", "lower-alpha", "upper-alpha"].includes(style),
         },
+        indent: {
+          default: 0,
+        },
       },
       content: "list_item+",
       group: "block list",
@@ -38,18 +41,33 @@ export default class OrderedList extends Node {
               ? parseInt(dom.getAttribute("start") || "1", 10)
               : 1,
             listStyle: dom.style.listStyleType,
+            indent: parseInt(dom.getAttribute("data-indent") || "0", 10),
           }),
         },
       ],
       toDOM: (node) => {
-        const attrs: { start?: number; style?: string } = {};
+        const attrs: { start?: number; style?: string; "data-indent"?: number } = {};
 
         if (node.attrs.order !== 1) {
           attrs.start = node.attrs.order;
         }
 
+        // Add indent data attribute
+        if (node.attrs.indent) {
+          attrs["data-indent"] = node.attrs.indent;
+        }
+
+        // Build inline style for list-style-type and indentation
+        const styles: string[] = [];
         if (node.attrs.listStyle !== "number") {
-          attrs.style = `list-style-type: ${node.attrs.listStyle}`;
+          styles.push(`list-style-type: ${node.attrs.listStyle}`);
+        }
+        if (node.attrs.indent) {
+          const indentValue = node.attrs.indent * 2; // 2em per indent level
+          styles.push(`margin-left: ${indentValue}em`);
+        }
+        if (styles.length > 0) {
+          attrs.style = styles.join("; ");
         }
 
         return ["ol", attrs, 0];

@@ -483,6 +483,25 @@ width: 100%;
     }
   }
 
+  // List indentation support (ol and ul)
+  ul[data-indent],
+  ol[data-indent] {
+    &[data-indent="1"] { margin-left: calc(-26px + 2em); }
+    &[data-indent="2"] { margin-left: calc(-26px + 4em); }
+    &[data-indent="3"] { margin-left: calc(-26px + 6em); }
+    &[data-indent="4"] { margin-left: calc(-26px + 8em); }
+    &[data-indent="5"] { margin-left: calc(-26px + 10em); }
+    
+    &:dir(rtl) {
+      margin-left: 0;
+      &[data-indent="1"] { margin-right: calc(-26px + 2em); }
+      &[data-indent="2"] { margin-right: calc(-26px + 4em); }
+      &[data-indent="3"] { margin-right: calc(-26px + 6em); }
+      &[data-indent="4"] { margin-right: calc(-26px + 8em); }
+      &[data-indent="5"] { margin-right: calc(-26px + 10em); }
+    }
+  }
+
 
 
   .ProseMirror-yjs-selection {
