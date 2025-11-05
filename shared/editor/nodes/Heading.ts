@@ -261,6 +261,8 @@ export default class Heading extends Node {
       Enter: splitHeading(type),
       Tab: setHeadingIndent("increase"),
       "Shift-Tab": setHeadingIndent("decrease"),
+      "Ctrl-ArrowRight": setHeadingIndent("increase"),
+      "Ctrl-ArrowLeft": setHeadingIndent("decrease"),
     };
   }
 

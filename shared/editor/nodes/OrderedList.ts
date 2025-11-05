@@ -52,22 +52,14 @@ export default class OrderedList extends Node {
           attrs.start = node.attrs.order;
         }
 
-        // Add indent data attribute
+        // Add indent data attribute (CSS in Styles.ts handles the actual indentation)
         if (node.attrs.indent) {
           attrs["data-indent"] = node.attrs.indent;
         }
 
-        // Build inline style for list-style-type and indentation
-        const styles: string[] = [];
+        // Build inline style for list-style-type only
         if (node.attrs.listStyle !== "number") {
-          styles.push(`list-style-type: ${node.attrs.listStyle}`);
-        }
-        if (node.attrs.indent) {
-          const indentValue = node.attrs.indent * 2; // 2em per indent level
-          styles.push(`margin-left: ${indentValue}em`);
-        }
-        if (styles.length > 0) {
-          attrs.style = styles.join("; ");
+          attrs.style = `list-style-type: ${node.attrs.listStyle}`;
         }
 
         return ["ol", attrs, 0];

@@ -318,7 +318,7 @@ function KeyboardShortcuts() {
           },
           {
             shortcut: <Key>{t("Tab")}</Key>,
-            label: t("Indent list item"),
+            label: t("Create nested list item"),
           },
           {
             shortcut: (
@@ -326,7 +326,23 @@ function KeyboardShortcuts() {
                 <Key symbol>⇧</Key> + <Key>{t("Tab")}</Key>
               </>
             ),
-            label: t("Outdent list item"),
+            label: t("Lift nested list item"),
+          },
+          {
+            shortcut: (
+              <>
+                <Key>Ctrl</Key> + <Key symbol>→</Key>
+              </>
+            ),
+            label: t("Indent entire list"),
+          },
+          {
+            shortcut: (
+              <>
+                <Key>Ctrl</Key> + <Key symbol>←</Key>
+              </>
+            ),
+            label: t("Outdent entire list"),
           },
           {
             shortcut: (
@@ -343,6 +359,39 @@ function KeyboardShortcuts() {
               </>
             ),
             label: t("Move list item down"),
+          },
+        ],
+      },
+      {
+        title: t("Indentation"),
+        items: [
+          {
+            shortcut: <Key>{t("Tab")}</Key>,
+            label: t("Indent paragraph or heading"),
+          },
+          {
+            shortcut: (
+              <>
+                <Key symbol>⇧</Key> + <Key>{t("Tab")}</Key>
+              </>
+            ),
+            label: t("Outdent paragraph or heading"),
+          },
+          {
+            shortcut: (
+              <>
+                <Key>Ctrl</Key> + <Key symbol>→</Key>
+              </>
+            ),
+            label: t("Indent paragraph or heading (alternative)"),
+          },
+          {
+            shortcut: (
+              <>
+                <Key>Ctrl</Key> + <Key symbol>←</Key>
+              </>
+            ),
+            label: t("Outdent paragraph or heading (alternative)"),
           },
         ],
       },

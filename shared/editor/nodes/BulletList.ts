@@ -34,15 +34,9 @@ export default class BulletList extends Node {
       toDOM: (node) => {
         const attrs: Record<string, any> = {};
 
-        // Add indent data attribute
+        // Add indent data attribute (CSS in Styles.ts handles the actual indentation)
         if (node.attrs.indent) {
           attrs["data-indent"] = node.attrs.indent;
-        }
-
-        // Build inline style for indentation
-        if (node.attrs.indent) {
-          const indentValue = node.attrs.indent * 2; // 2em per indent level
-          attrs.style = `margin-left: ${indentValue}em`;
         }
 
         return ["ul", attrs, 0];

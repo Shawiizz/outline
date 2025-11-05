@@ -1,5 +1,9 @@
 import { NodeSpec, NodeType, Node as ProsemirrorNode } from "prosemirror-model";
-import { splitListItem } from "prosemirror-schema-list";
+import {
+  splitListItem,
+  sinkListItem,
+  liftListItem,
+} from "prosemirror-schema-list";
 import {
   Transaction,
   EditorState,
@@ -206,10 +210,10 @@ export default class ListItem extends Node {
   keys({ type }: { type: NodeType }): Record<string, Command> {
     return {
       Enter: splitListItem(type),
-      Tab: setListIndent("increase"),
-      "Shift-Tab": setListIndent("decrease"),
-      "Mod-]": setListIndent("increase"),
-      "Mod-[": setListIndent("decrease"),
+      Tab: sinkListItem(type),
+      "Shift-Tab": liftListItem(type),
+      "Ctrl-ArrowRight": setListIndent("increase"),
+      "Ctrl-ArrowLeft": setListIndent("decrease"),
       "Shift-Enter": (state, dispatch) => {
         if (!isInList(state)) {
           return false;

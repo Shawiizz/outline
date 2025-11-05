@@ -1,6 +1,10 @@
 import { Token } from "markdown-it";
 import { NodeSpec, Node as ProsemirrorNode, NodeType } from "prosemirror-model";
-import { splitListItem } from "prosemirror-schema-list";
+import {
+  splitListItem,
+  sinkListItem,
+  liftListItem,
+} from "prosemirror-schema-list";
 import { v4 as uuidv4 } from "uuid";
 import toggleCheckboxItem from "../commands/toggleCheckboxItem";
 import setListIndent from "../commands/setListIndent";
@@ -100,11 +104,11 @@ export default class CheckboxItem extends Node {
       Enter: splitListItem(type, {
         checked: false,
       }),
-      Tab: setListIndent("increase"),
+      Tab: sinkListItem(type),
+      "Shift-Tab": liftListItem(type),
+      "Ctrl-ArrowRight": setListIndent("increase"),
       "Mod-Enter": toggleCheckboxItem(),
-      "Shift-Tab": setListIndent("decrease"),
-      "Mod-]": setListIndent("increase"),
-      "Mod-[": setListIndent("decrease"),
+      "Ctrl-ArrowLeft": setListIndent("decrease"),
     };
   }
 

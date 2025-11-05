@@ -78,6 +78,8 @@ export default class Paragraph extends Node {
       Backspace: deleteEmptyFirstParagraph,
       Tab: setParagraphIndent("increase"),
       "Shift-Tab": setParagraphIndent("decrease"),
+      "Ctrl-ArrowRight": setParagraphIndent("increase"),
+      "Ctrl-ArrowLeft": setParagraphIndent("decrease"),
     };
   }
 
