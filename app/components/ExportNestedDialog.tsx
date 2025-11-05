@@ -23,7 +23,6 @@ function ExportNestedDialog({ documentId, onRequestClose }: Props) {
     const { t } = useTranslation();
     const { documents } = useStores();
     const [format, setFormat] = React.useState<"markdown" | "html" | "pdf">("markdown");
-    const [isExporting, setIsExporting] = React.useState(false);
     const [selectedDocuments, setSelectedDocuments] = React.useState<Set<string>>(new Set());
     const [isLoadingDocs, setIsLoadingDocs] = React.useState(true);
 
@@ -89,7 +88,18 @@ function ExportNestedDialog({ documentId, onRequestClose }: Props) {
             return;
         }
 
-        setIsExporting(true);
+        // Close dialog immediately
+        onRequestClose();
+
+        // Show info toast that export is in progress
+        const message = selectedDocuments.size > 3
+            ? (format === "pdf"
+                ? t("Creating export of {{count}} documents as PDF. This may take several seconds to several minutes. The download will start automatically when ready.", { count: selectedDocuments.size })
+                : t("Creating export of {{count}} documents. The download will start automatically when ready.", { count: selectedDocuments.size }))
+            : t("Creating export. The download will start automatically when ready.");
+        
+        toast.loading(message, { id: "export-nested" });
+
         try {
             await client.post(
                 "/documents.export_nested",
@@ -103,13 +113,10 @@ function ExportNestedDialog({ documentId, onRequestClose }: Props) {
                 }
             );
 
-            toast.success(t("Document and nested documents exported successfully"));
-            onRequestClose();
+            toast.success(t("Export completed and downloaded successfully"), { id: "export-nested" });
         } catch (error) {
             console.error("Export error:", error);
-            toast.error(t("Failed to export documents"));
-        } finally {
-            setIsExporting(false);
+            toast.error(t("Failed to export documents"), { id: "export-nested" });
         }
     };
 
@@ -266,11 +273,11 @@ function ExportNestedDialog({ documentId, onRequestClose }: Props) {
             </Flex>
 
             <Flex justify="flex-end" gap={8}>
-                <Button onClick={onRequestClose} disabled={isExporting} neutral>
+                <Button onClick={onRequestClose} neutral>
                     {t("Cancel")}
                 </Button>
-                <Button onClick={handleExport} disabled={isExporting}>
-                    {isExporting ? t("Exporting…") : t("Export")}
+                <Button onClick={handleExport}>
+                    {t("Export")}
                 </Button>
             </Flex>
         </Flex>

@@ -29,12 +29,20 @@ COPY --from=base $APP_PATH/package.json ./package.json
 
 # Install wget to healthcheck the server and Chrome for PDF export
 RUN  apt-get update \
-    && apt-get install -y wget gnupg \
+    && apt-get install -y wget gnupg curl unzip \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
-    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
-      --no-install-recommends \
+    && apt-get install -y google-chrome-stable \
+    fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf \
+    fonts-noto-color-emoji fonts-noto-cjk fonts-liberation fonts-dejavu-core \
+    libxss1 --no-install-recommends \
+    && mkdir -p /usr/share/fonts/truetype/inter \
+    && curl -L https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip -o /tmp/inter.zip \
+    && unzip /tmp/inter.zip -d /tmp/inter \
+    && cp /tmp/inter/extras/ttf/*.ttf /usr/share/fonts/truetype/inter/ \
+    && fc-cache -f -v \
+    && rm -rf /tmp/inter.zip /tmp/inter \
     && rm -rf /var/lib/apt/lists/*
 
 ENV FILE_STORAGE_LOCAL_ROOT_DIR=/var/lib/outline/data

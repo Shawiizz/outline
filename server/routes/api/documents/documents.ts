@@ -745,6 +745,13 @@ router.post(
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
   auth(),
   validate(T.DocumentsExportSchema),
+  async (ctx: APIContext<T.DocumentsExportReq>, next) => {
+    // Extend timeout for export operations (especially PDF generation)
+    if (ctx.req.socket) {
+      ctx.req.socket.setTimeout(3 * 60 * 1000); // 3 minutes
+    }
+    await next();
+  },
   async (ctx: APIContext<T.DocumentsExportReq>) => {
     const { id } = ctx.input.body;
     const { user } = ctx.state.auth;
@@ -872,6 +879,14 @@ router.post(
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
   auth({ role: UserRole.Member }),
   validate(T.DocumentsExportNestedSchema),
+  async (ctx: APIContext<T.DocumentsExportNestedReq>, next) => {
+    // Extend timeout for nested export operations (especially PDFs with many documents)
+    // as they can take significantly longer than the default 10 seconds
+    if (ctx.req.socket) {
+      ctx.req.socket.setTimeout(5 * 60 * 1000); // 5 minutes
+    }
+    await next();
+  },
   async (ctx: APIContext<T.DocumentsExportNestedReq>) => {
     const { id, format, documentIds } = ctx.input.body;
     const { user } = ctx.state.auth;
@@ -921,35 +936,164 @@ router.post(
     // Export each document based on format
     const extension = format === "pdf" ? "pdf" : format === "html" ? "html" : "md";
 
-    for (const [docId, docPath] of documentPaths) {
-      const doc = docId === document.id
-        ? document
-        : await Document.findByPk(docId, { paranoid: true });
+    // For PDF export, reuse the same browser instance for better performance
+    let puppeteerBrowser: any = null;
+    if (format === "pdf") {
+      try {
+        const puppeteer = require("puppeteer");
+        puppeteerBrowser = await puppeteer.launch({
+          headless: true,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+          ],
+        });
+      } catch (error) {
+        throw new Error(
+          "Puppeteer is not installed. Run: npm install puppeteer"
+        );
+      }
+    }
 
-      if (!doc) continue;
+    try {
+      // Collect all promises for attachments to ensure they're all resolved before streaming
+      const attachmentPromises: Promise<void>[] = [];
 
-      const filePath = `${docPath}.${extension}`;
+      for (const [docId, docPath] of documentPaths) {
+        const doc = docId === document.id
+          ? document
+          : await Document.findByPk(docId, { paranoid: true });
 
-      if (format === "pdf") {
-        const { PdfGenerator } = await import("@server/utils/PdfGenerator");
-        const pdfBuffer = await PdfGenerator.generatePDF(doc);
-        zip.file(filePath, pdfBuffer, {
-          date: doc.updatedAt,
-        });
-      } else if (format === "html") {
-        const html = await DocumentHelper.toHTML(doc, {
-          centered: true,
-          includeMermaid: true,
-        });
-        zip.file(filePath, html, {
-          date: doc.updatedAt,
-        });
-      } else {
-        // markdown (default)
-        const markdown = DocumentHelper.toMarkdown(doc);
-        zip.file(filePath, markdown, {
-          date: doc.updatedAt,
-        });
+        if (!doc) continue;
+
+        const filePath = `${docPath}.${extension}`;
+
+        if (format === "pdf") {
+          const { PdfGenerator } = await import("@server/utils/PdfGenerator");
+          const pdfBuffer = await PdfGenerator.generatePDF(doc, puppeteerBrowser);
+          zip.file(filePath, pdfBuffer, {
+            date: doc.updatedAt,
+          });
+        } else if (format === "html") {
+          let html = await DocumentHelper.toHTML(doc, {
+            centered: true,
+            includeMermaid: true,
+          });
+
+          // Get attachments for this document
+          const { ProsemirrorHelper } = await import("@server/models/helpers/ProsemirrorHelper");
+          const attachmentIds = ProsemirrorHelper.parseAttachmentIds(
+            DocumentHelper.toProsemirror(doc)
+          );
+          const attachments = attachmentIds.length
+            ? await Attachment.findAll({
+              where: {
+                teamId: doc.teamId,
+                id: attachmentIds,
+              },
+            })
+            : [];
+
+          // Add attachments to zip and replace URLs
+          for (const attachment of attachments) {
+            const dir = path.dirname(filePath);
+            // Resolve the buffer immediately and store it
+            const bufferPromise = attachment.buffer.catch((err) => {
+              Logger.warn(`Failed to read attachment from storage`, {
+                attachmentId: attachment.id,
+                teamId: attachment.teamId,
+                error: err.message,
+              });
+              return Buffer.from("");
+            });
+            
+            attachmentPromises.push(
+              bufferPromise.then((buffer) => {
+                zip.file(
+                  path.join(dir, attachment.key),
+                  buffer,
+                  {
+                    date: attachment.updatedAt,
+                    createFolders: true,
+                  }
+                );
+              })
+            );
+
+            html = html.replace(
+              new RegExp(escapeRegExp(attachment.redirectUrl), "g"),
+              encodeURI(attachment.key)
+            );
+          }
+
+          zip.file(filePath, html, {
+            date: doc.updatedAt,
+          });
+        } else {
+          // markdown (default)
+          let markdown = DocumentHelper.toMarkdown(doc);
+
+          // Get attachments for this document
+          const { ProsemirrorHelper } = await import("@server/models/helpers/ProsemirrorHelper");
+          const attachmentIds = ProsemirrorHelper.parseAttachmentIds(
+            DocumentHelper.toProsemirror(doc)
+          );
+          const attachments = attachmentIds.length
+            ? await Attachment.findAll({
+              where: {
+                teamId: doc.teamId,
+                id: attachmentIds,
+              },
+            })
+            : [];
+
+          // Add attachments to zip and replace URLs
+          for (const attachment of attachments) {
+            const dir = path.dirname(filePath);
+            // Resolve the buffer immediately and store it
+            const bufferPromise = attachment.buffer.catch((err) => {
+              Logger.warn(`Failed to read attachment from storage`, {
+                attachmentId: attachment.id,
+                teamId: attachment.teamId,
+                error: err.message,
+              });
+              return Buffer.from("");
+            });
+            
+            attachmentPromises.push(
+              bufferPromise.then((buffer) => {
+                zip.file(
+                  path.join(dir, attachment.key),
+                  buffer,
+                  {
+                    date: attachment.updatedAt,
+                    createFolders: true,
+                  }
+                );
+              })
+            );
+
+            markdown = markdown.replace(
+              new RegExp(escapeRegExp(attachment.redirectUrl), "g"),
+              encodeURI(attachment.key)
+            );
+          }
+
+          zip.file(filePath, markdown, {
+            date: doc.updatedAt,
+          });
+        }
+      }
+
+      // Wait for all attachment buffers to be loaded before generating the stream
+      await Promise.all(attachmentPromises);
+
+    } finally {
+      // Close the browser after all PDFs are generated
+      if (puppeteerBrowser) {
+        await puppeteerBrowser.close();
       }
     }
 

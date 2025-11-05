@@ -12,9 +12,13 @@ export class PdfGenerator {
   /**
    * Generate a PDF from a document using Puppeteer
    * @param document The document to convert to PDF
+   * @param browser Optional existing browser instance to reuse
    * @returns Buffer containing the PDF data
    */
-  public static async generatePDF(document: Document): Promise<Buffer> {
+  public static async generatePDF(
+    document: Document,
+    browser?: any
+  ): Promise<Buffer> {
     let puppeteer;
 
     try {
@@ -35,20 +39,23 @@ export class PdfGenerator {
       signedUrls: 300, // 5 minutes validity for signed attachment URLs
     });
 
-    // Launch browser in headless mode
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
-    });
+    // Use provided browser or launch a new one
+    const shouldCloseBrowser = !browser;
+    if (!browser) {
+      browser = await puppeteer.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+        ],
+      });
+    }
+
+    const page = await browser.newPage();
 
     try {
-      const page = await browser.newPage();
-
       // Render LaTeX math equations server-side and syntax highlight code
       const htmlWithRenderedMath = await this.renderMathServerSide(html);
 
@@ -68,7 +75,7 @@ export class PdfGenerator {
         displayHeaderFooter: true,
         headerTemplate: '<div style="width: 100%; font-size: 1px; padding: 0; margin: 0;">&nbsp;</div>',
         footerTemplate: `
-                    <div style="width: 100%; font-size: 14px; padding: 0 15mm 0 0; margin: 0; box-sizing: border-box;">
+                    <div style="width: 100%; font-size: 14px; padding: 0 15mm 0 0; margin: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, Inter, 'Segoe UI', Roboto, Oxygen, sans-serif;">
                         <div style="text-align: right; color: #6b7280;">
                             <span class="pageNumber"></span> / <span class="totalPages"></span>
                         </div>
@@ -86,7 +93,13 @@ export class PdfGenerator {
 
       return Buffer.from(pdfBuffer);
     } finally {
-      await browser.close();
+      // Close the page
+      await page.close();
+
+      // Only close browser if we created it (not reusing an existing one)
+      if (shouldCloseBrowser) {
+        await browser.close();
+      }
     }
   }
 
@@ -182,7 +195,13 @@ export class PdfGenerator {
         if (!codeElement) continue;
 
         const code = codeElement.textContent || '';
-        const language = block.getAttribute('data-language') || 'text';
+        let language = block.getAttribute('data-language') || 'text';
+
+        // Map unsupported or invalid languages to 'text'
+        // Shiki doesn't support 'none' or empty language
+        if (!language || language === 'none' || language.trim() === '') {
+          language = 'text';
+        }
 
         // Use shiki to render syntax-highlighted HTML (without background)
         const highlighted = await codeToHtml(code, {
