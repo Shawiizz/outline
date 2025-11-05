@@ -52,6 +52,8 @@
   "Creating export of {{count}} documents as PDF. This may take several seconds to several minutes. The download will start automatically when ready.": "Création de l'export de {{count}} documents en PDF. Cela peut prendre plusieurs secondes à plusieurs minutes. Le téléchargement démarrera automatiquement une fois prêt.",
   "Creating export of {{count}} documents. The download will start automatically when ready.": "Création de l'export de {{count}} documents. Le téléchargement démarrera automatiquement une fois prêt.",
   "Creating export. The download will start automatically when ready.": "Création de l'export en cours. Le téléchargement démarrera automatiquement une fois prêt.",
+  "Preparing export... (0/{{total}})": "Préparation de l'export... (0/{{total}})",
+  "Exporting documents... ({{current}}/{{total}})": "Export des documents... ({{current}}/{{total}})",
   "Export completed and downloaded successfully": "Export terminé et téléchargé avec succès",
   "Exporting…": "Exportation en cours…",
   "Run Code": "Exécuter le code",

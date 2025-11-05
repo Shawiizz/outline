@@ -165,6 +165,8 @@ export const DocumentsExportNestedSchema = BaseSchema.extend({
     format: z.enum(["markdown", "html", "pdf"]).optional().default("markdown"),
     /** Optional list of document IDs to export (if not provided, exports all nested documents) */
     documentIds: z.array(z.string().uuid()).optional(),
+    /** Export ID for tracking progress */
+    exportId: z.string().uuid().optional(),
   }),
 });
 

@@ -91,14 +91,41 @@ function ExportNestedDialog({ documentId, onRequestClose }: Props) {
         // Close dialog immediately
         onRequestClose();
 
-        // Show info toast that export is in progress
-        const message = selectedDocuments.size > 3
-            ? (format === "pdf"
-                ? t("Creating export of {{count}} documents as PDF. This may take several seconds to several minutes. The download will start automatically when ready.", { count: selectedDocuments.size })
-                : t("Creating export of {{count}} documents. The download will start automatically when ready.", { count: selectedDocuments.size }))
-            : t("Creating export. The download will start automatically when ready.");
-        
-        toast.loading(message, { id: "export-nested" });
+        // Generate export ID
+        const exportId = crypto.randomUUID();
+        const total = selectedDocuments.size;
+
+        // Show initial progress toast
+        toast.loading(
+            t("Preparing export... (0/{{total}})", { total }),
+            { id: "export-nested" }
+        );
+
+        // Start polling for progress
+        const pollInterval = setInterval(async () => {
+            try {
+                const response = await client.post("/documents.export_progress", {
+                    exportId,
+                });
+                
+                const { current, total: totalDocs, status } = response.data;
+
+                if (status === "processing") {
+                    toast.loading(
+                        t("Exporting documents... ({{current}}/{{total}})", {
+                            current,
+                            total: totalDocs,
+                        }),
+                        { id: "export-nested" }
+                    );
+                } else if (status === "complete") {
+                    clearInterval(pollInterval);
+                }
+            } catch (error) {
+                // Ignore polling errors
+                console.debug("Progress poll error:", error);
+            }
+        }, 2000);
 
         try {
             await client.post(
@@ -107,14 +134,17 @@ function ExportNestedDialog({ documentId, onRequestClose }: Props) {
                     id: documentId,
                     format,
                     documentIds: Array.from(selectedDocuments),
+                    exportId, // Send the exportId to the server
                 },
                 {
                     download: true,
                 }
             );
 
+            clearInterval(pollInterval);
             toast.success(t("Export completed and downloaded successfully"), { id: "export-nested" });
         } catch (error) {
+            clearInterval(pollInterval);
             console.error("Export error:", error);
             toast.error(t("Failed to export documents"), { id: "export-nested" });
         }

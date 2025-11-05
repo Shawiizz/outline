@@ -52,6 +52,8 @@
   "Creating export of {{count}} documents as PDF. This may take several seconds to several minutes. The download will start automatically when ready.": "Creating export of {{count}} documents as PDF. This may take several seconds to several minutes. The download will start automatically when ready.",
   "Creating export of {{count}} documents. The download will start automatically when ready.": "Creating export of {{count}} documents. The download will start automatically when ready.",
   "Creating export. The download will start automatically when ready.": "Creating export. The download will start automatically when ready.",
+  "Preparing export... (0/{{total}})": "Preparing export... (0/{{total}})",
+  "Exporting documents... ({{current}}/{{total}})": "Exporting documents... ({{current}}/{{total}})",
   "Export completed and downloaded successfully": "Export completed and downloaded successfully",
   "Exporting…": "Exporting…",
   "Run Code": "Run Code",

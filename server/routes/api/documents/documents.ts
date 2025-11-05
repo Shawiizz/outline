@@ -70,6 +70,7 @@ import DocumentImportTask, {
 } from "@server/queues/tasks/DocumentImportTask";
 import EmptyTrashTask from "@server/queues/tasks/EmptyTrashTask";
 import FileStorage from "@server/storage/files";
+import Redis from "@server/storage/redis";
 import { APIContext } from "@server/types";
 import { RateLimiterStrategy } from "@server/utils/RateLimiter";
 import ZipHelper from "@server/utils/ZipHelper";
@@ -888,7 +889,7 @@ router.post(
     await next();
   },
   async (ctx: APIContext<T.DocumentsExportNestedReq>) => {
-    const { id, format, documentIds } = ctx.input.body;
+    const { id, format, documentIds, exportId: clientExportId } = ctx.input.body;
     const { user } = ctx.state.auth;
 
     const document = await documentLoader({
@@ -957,9 +958,23 @@ router.post(
       }
     }
 
+    // Use client-provided export ID or generate a new one
+    const exportId = clientExportId || randomUUID();
+    const progressKey = `export:progress:${exportId}`;
+    
     try {
       // Collect all promises for attachments to ensure they're all resolved before streaming
       const attachmentPromises: Promise<void>[] = [];
+      
+      const totalDocs = documentPaths.size;
+      let processedDocs = 0;
+
+      // Store initial progress in Redis
+      await Redis.defaultClient.setex(
+        progressKey,
+        600, // 10 minutes TTL
+        JSON.stringify({ current: 0, total: totalDocs, status: "processing" })
+      );
 
       for (const [docId, docPath] of documentPaths) {
         const doc = docId === document.id
@@ -1085,10 +1100,25 @@ router.post(
             date: doc.updatedAt,
           });
         }
+
+        // Update progress after each document
+        processedDocs++;
+        await Redis.defaultClient.setex(
+          progressKey,
+          600,
+          JSON.stringify({ current: processedDocs, total: totalDocs, status: "processing" })
+        );
       }
 
       // Wait for all attachment buffers to be loaded before generating the stream
       await Promise.all(attachmentPromises);
+
+      // Mark as complete
+      await Redis.defaultClient.setex(
+        progressKey,
+        600,
+        JSON.stringify({ current: totalDocs, total: totalDocs, status: "complete" })
+      );
 
     } finally {
       // Close the browser after all PDFs are generated
@@ -1105,7 +1135,34 @@ router.post(
         type: "attachment",
       })
     );
+    ctx.set("X-Export-Id", exportId);
     ctx.body = zip.generateNodeStream(ZipHelper.defaultStreamOptions);
+  }
+);
+
+router.post(
+  "documents.export_progress",
+  auth(),
+  async (ctx: APIContext) => {
+    const { exportId } = ctx.request.body as { exportId: string };
+    
+    if (!exportId) {
+      throw InvalidRequestError("exportId is required");
+    }
+
+    const progressKey = `export:progress:${exportId}`;
+    const progressData = await Redis.defaultClient.get(progressKey);
+
+    if (!progressData) {
+      ctx.body = {
+        data: { current: 0, total: 0, status: "notfound" }
+      };
+      return;
+    }
+
+    ctx.body = {
+      data: JSON.parse(progressData)
+    };
   }
 );
 
