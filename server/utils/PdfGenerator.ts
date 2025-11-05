@@ -305,6 +305,9 @@ export class PdfGenerator {
         @page {
           margin: 15mm 20mm 25mm 20mm;
         }
+        @page :first {
+          margin-top: 5mm;
+        }
         .math-display-rendered {
           margin: 1em 0;
           text-align: center;

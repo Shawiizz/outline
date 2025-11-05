@@ -51,8 +51,7 @@ const BaseMenuItemCSS = css<BaseMenuItemProps>`
     `
     color: ${props.theme.accentText};
     background: ${props.$dangerous ? props.theme.danger : props.theme.accent};
-    outline-color: ${
-      props.$dangerous ? props.theme.danger : props.theme.accent
+    outline-color: ${props.$dangerous ? props.theme.danger : props.theme.accent
     };
     box-shadow: none;
     cursor: var(--pointer);
@@ -69,9 +68,8 @@ const BaseMenuItemCSS = css<BaseMenuItemProps>`
       &:focus-visible {
         color: ${props.theme.accentText};
         background: ${props.$dangerous ? props.theme.danger : props.theme.accent};
-        outline-color: ${
-          props.$dangerous ? props.theme.danger : props.theme.accent
-        };
+        outline-color: ${props.$dangerous ? props.theme.danger : props.theme.accent
+    };
         box-shadow: none;
         cursor: var(--pointer);
 
@@ -153,13 +151,13 @@ export const SelectedIconWrapper = styled.span`
   flex-shrink: 0;
 `;
 
-export const MenuContent = styled(Scrollable)<{
+export const MenuContent = styled(Scrollable) <{
   maxHeightVar: string;
   transformOriginVar: string;
 }>`
   z-index: ${depths.menu};
   min-width: 180px;
-  max-width: 276px;
+  max-width: fit-content;
   min-height: 44px;
   max-height: ${({ maxHeightVar }) => `min(85vh, var(${maxHeightVar}))`};
   font-weight: normal;

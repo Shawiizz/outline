@@ -224,7 +224,7 @@ const Wrapper = styled.div<{
   margin: 25vh auto auto auto;
   width: 75vw;
   min-width: 350px;
-  max-width: ${(props) => props.$width || "450px"};
+  max-width: ${(props) => props.$width || "fit-content"};
   max-height: ${(props) => props.$height || "70vh"};
   z-index: ${depths.modal};
   display: flex;

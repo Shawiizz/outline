@@ -44,7 +44,7 @@ export default function setListIndent(
         }
 
         const listNode = $from.node(listDepth);
-        
+
         // Verify it's actually a list node
         if (listNode.type !== bulletListType && listNode.type !== orderedListType) {
             return false;

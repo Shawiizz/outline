@@ -575,8 +575,8 @@ function KeyboardShortcuts() {
       {categories.map((category, x) => {
         const filtered = searchTerm
           ? category.items.filter((item) =>
-              item.label.toLocaleLowerCase().includes(normalizedSearchTerm)
-            )
+            item.label.toLocaleLowerCase().includes(normalizedSearchTerm)
+          )
           : category.items;
 
         if (!filtered.length) {
