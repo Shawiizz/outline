@@ -37,7 +37,7 @@ export function useTemplateMenuActions({
   documentId,
   onSelectTemplate,
 }: Props) {
-  const user = useCurrentUser();
+  const user = useCurrentUser({ rejectOnEmpty: false });
   const { documents } = useStores();
   const { t } = useTranslation();
   const document = documents.get(documentId);
@@ -45,10 +45,12 @@ export function useTemplateMenuActions({
   const templateToAction = useCallback(
     (template: Document): ActionV2 =>
       createActionV2({
-        name: TextHelper.replaceTemplateVariables(
-          template.titleWithDefault,
-          user
-        ),
+        name: user
+          ? TextHelper.replaceTemplateVariables(
+              template.titleWithDefault,
+              user
+            )
+          : template.titleWithDefault,
         section: DocumentsSection,
         icon: template.icon ? (
           <Icon value={template.icon} color={template.color ?? undefined} />

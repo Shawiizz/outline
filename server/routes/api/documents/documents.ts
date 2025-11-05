@@ -44,6 +44,7 @@ import {
   Event,
   Revision,
   SearchQuery,
+  Share,
   User,
   View,
   UserMembership,
@@ -744,7 +745,7 @@ router.post(
 router.post(
   "documents.export",
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
-  auth(),
+  auth({ optional: true }),
   validate(T.DocumentsExportSchema),
   async (ctx: APIContext<T.DocumentsExportReq>, next) => {
     // Extend timeout for export operations (especially PDF generation)
@@ -754,9 +755,31 @@ router.post(
     await next();
   },
   async (ctx: APIContext<T.DocumentsExportReq>) => {
-    const { id } = ctx.input.body;
+    const { id, shareId } = ctx.input.body;
     const { user } = ctx.state.auth;
     const accept = ctx.request.headers["accept"];
+
+    // If user is not authenticated, verify the document is publicly shared
+    if (!user) {
+      if (!shareId) {
+        throw AuthenticationError(
+          "Authentication required to export this document"
+        );
+      }
+
+      const share = await Share.findOne({
+        where: {
+          id: shareId,
+          published: true,
+        },
+      });
+
+      if (!share) {
+        throw AuthenticationError(
+          "Authentication required to export this document"
+        );
+      }
+    }
 
     const document = await documentLoader({
       id,
@@ -878,7 +901,7 @@ router.post(
 router.post(
   "documents.export_nested",
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
-  auth({ role: UserRole.Member }),
+  auth({ optional: true }),
   validate(T.DocumentsExportNestedSchema),
   async (ctx: APIContext<T.DocumentsExportNestedReq>, next) => {
     // Extend timeout for nested export operations (especially PDFs with many documents)
@@ -889,8 +912,30 @@ router.post(
     await next();
   },
   async (ctx: APIContext<T.DocumentsExportNestedReq>) => {
-    const { id, format, documentIds, exportId: clientExportId } = ctx.input.body;
+    const { id, format, documentIds, exportId: clientExportId, shareId } = ctx.input.body;
     const { user } = ctx.state.auth;
+
+    // If user is not authenticated, verify the document is publicly shared
+    if (!user) {
+      if (!shareId) {
+        throw AuthenticationError(
+          "Authentication required to export this document"
+        );
+      }
+
+      const share = await Share.findOne({
+        where: {
+          id: shareId,
+          published: true,
+        },
+      });
+
+      if (!share) {
+        throw AuthenticationError(
+          "Authentication required to export this document"
+        );
+      }
+    }
 
     const document = await documentLoader({
       id,
@@ -913,6 +958,30 @@ router.post(
         return;
       }
 
+      // If user is not authenticated, verify each nested document is accessible
+      if (!user) {
+        // Check if document is shared via a published share or via parent share with includeChildDocuments
+        const hasPublicShare = await Share.findOne({
+          where: {
+            documentId: doc.id,
+            published: true,
+          },
+        });
+
+        const hasParentShareWithChildren = await Share.findOne({
+          where: {
+            documentId: document.id,
+            published: true,
+            includeChildDocuments: true,
+          },
+        });
+
+        if (!hasPublicShare && !hasParentShareWithChildren) {
+          // Skip this document if it's not publicly accessible
+          return;
+        }
+      }
+
       const fileName = slugify(doc.titleWithDefault);
       const currentPath = parentPath ? `${parentPath}/${fileName}` : fileName;
       documentPaths.set(doc.id, currentPath);
@@ -921,7 +990,7 @@ router.post(
       const children = await Document.findAll({
         where: {
           parentDocumentId: doc.id,
-          teamId: user.teamId,
+          teamId: doc.teamId,
         },
         paranoid: true,
       });

@@ -55,7 +55,7 @@ function DocumentMenu({
   onFindAndReplace,
 }: Props) {
   const { t } = useTranslation();
-  const user = useCurrentUser();
+  const user = useCurrentUser({ rejectOnEmpty: false });
   const isMobile = useMobile();
   const can = usePolicy(document);
 
@@ -110,8 +110,10 @@ function DocumentMenu({
 
   const handleFullWidthToggle = React.useCallback(
     (checked: boolean) => {
-      user.setPreference(UserPreference.FullWidthDocuments, checked);
-      void user.save();
+      if (user) {
+        user.setPreference(UserPreference.FullWidthDocuments, checked);
+        void user.save();
+      }
       document.fullWidth = checked;
       void document.save({ fullWidth: checked });
     },

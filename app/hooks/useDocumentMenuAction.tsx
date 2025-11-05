@@ -61,7 +61,7 @@ export function useDocumentMenuAction({
 }: Props) {
   const { t } = useTranslation();
   const isMobile = useMobile();
-  const user = useCurrentUser();
+  const user = useCurrentUser({ rejectOnEmpty: false });
   const can = usePolicy(documentId);
 
   const templateMenuActions = useTemplateMenuActions({
@@ -90,7 +90,7 @@ export function useDocumentMenuAction({
         name: `${t("Rename")}…`,
         section: ActiveDocumentSection,
         icon: <InputIcon />,
-        visible: !!can.update && !user.separateEditMode && !!onRename,
+        visible: !!can.update && !user?.separateEditMode && !!onRename,
         perform: () => requestAnimationFrame(() => onRename?.()),
       }),
       shareDocument,
@@ -124,7 +124,7 @@ export function useDocumentMenuAction({
       isMobile,
       templateMenuActions,
       can.update,
-      user.separateEditMode,
+      user?.separateEditMode,
       onFindAndReplace,
       onRename,
     ]

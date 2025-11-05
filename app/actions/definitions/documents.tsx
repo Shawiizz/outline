@@ -519,8 +519,14 @@ export const downloadDocumentAsHTML = createActionV2({
   keywords: "html export",
   icon: <DownloadIcon />,
   iconInContextMenu: false,
-  visible: ({ activeDocumentId, stores }) =>
-    !!activeDocumentId && stores.policies.abilities(activeDocumentId).download,
+  visible: ({ activeDocumentId, stores, location }) => {
+    if (!activeDocumentId) {
+      return false;
+    }
+    // Allow download for shared documents (public links)
+    const isSharedDocument = location.pathname.startsWith("/s/");
+    return isSharedDocument || stores.policies.abilities(activeDocumentId).download;
+  },
   perform: async ({ activeDocumentId, stores }) => {
     if (!activeDocumentId) {
       return;
@@ -538,11 +544,14 @@ export const downloadDocumentAsPDF = createActionV2({
   keywords: "export pdf print",
   icon: <DownloadIcon />,
   iconInContextMenu: false,
-  visible: ({ activeDocumentId, stores }) =>
-    !!(
-      activeDocumentId &&
-      stores.policies.abilities(activeDocumentId).download
-    ),
+  visible: ({ activeDocumentId, stores, location }) => {
+    if (!activeDocumentId) {
+      return false;
+    }
+    // Allow download for shared documents (public links)
+    const isSharedDocument = location.pathname.startsWith("/s/");
+    return isSharedDocument || stores.policies.abilities(activeDocumentId).download;
+  },
   perform: async ({ activeDocumentId, stores, t }) => {
     if (!activeDocumentId) {
       return;
@@ -569,8 +578,14 @@ export const downloadDocumentAsMarkdown = createActionV2({
   keywords: "md markdown export",
   icon: <DownloadIcon />,
   iconInContextMenu: false,
-  visible: ({ activeDocumentId, stores }) =>
-    !!activeDocumentId && stores.policies.abilities(activeDocumentId).download,
+  visible: ({ activeDocumentId, stores, location }) => {
+    if (!activeDocumentId) {
+      return false;
+    }
+    // Allow download for shared documents (public links)
+    const isSharedDocument = location.pathname.startsWith("/s/");
+    return isSharedDocument || stores.policies.abilities(activeDocumentId).download;
+  },
   perform: async ({ activeDocumentId, stores }) => {
     if (!activeDocumentId) {
       return;
@@ -588,16 +603,17 @@ export const downloadDocumentNested = createActionV2({
   keywords: "export nested children subdocuments",
   icon: <DownloadIcon />,
   iconInContextMenu: false,
-  visible: ({ activeDocumentId, stores }) => {
+  visible: ({ activeDocumentId, stores, location }) => {
     if (!activeDocumentId) {
       return false;
     }
     const document = stores.documents.get(activeDocumentId);
-    return !!(
-      document &&
-      stores.policies.abilities(activeDocumentId).download &&
-      document.childDocuments.length > 0
-    );
+    if (!document || document.childDocuments.length === 0) {
+      return false;
+    }
+    // Allow download for shared documents (public links)
+    const isSharedDocument = location.pathname.startsWith("/s/");
+    return isSharedDocument || stores.policies.abilities(activeDocumentId).download;
   },
   perform: async ({ activeDocumentId, stores, t }) => {
     if (!activeDocumentId) {
@@ -626,8 +642,14 @@ export const downloadDocument = createActionV2WithChildren({
   section: ActiveDocumentSection,
   icon: <DownloadIcon />,
   keywords: "export",
-  visible: ({ activeDocumentId, stores }) =>
-    !!activeDocumentId && stores.policies.abilities(activeDocumentId).download,
+  visible: ({ activeDocumentId, stores, location }) => {
+    if (!activeDocumentId) {
+      return false;
+    }
+    // Allow download for shared documents (public links)
+    const isSharedDocument = location.pathname.startsWith("/s/");
+    return isSharedDocument || stores.policies.abilities(activeDocumentId).download;
+  },
   children: [
     downloadDocumentAsHTML,
     downloadDocumentAsPDF,

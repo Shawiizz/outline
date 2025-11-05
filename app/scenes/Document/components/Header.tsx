@@ -35,6 +35,7 @@ import DocumentMenu from "~/menus/DocumentMenu";
 import NewChildDocumentMenu from "~/menus/NewChildDocumentMenu";
 import TableOfContentsMenu from "~/menus/TableOfContentsMenu";
 import TemplatesMenu from "~/menus/TemplatesMenu";
+import SharedDocumentMenu from "~/menus/SharedDocumentMenu";
 import { documentEditPath } from "~/utils/routeHelpers";
 import ObservingBanner from "./ObservingBanner";
 import PublicBreadcrumb from "./PublicBreadcrumb";
@@ -201,6 +202,13 @@ function DocumentHeader({
         actions={
           <>
             <AppearanceAction />
+            <Action>
+              <SharedDocumentMenu
+                document={document}
+                align="end"
+                neutral
+              />
+            </Action>
             {can.update && !isEditing ? editAction : <div />}
           </>
         }

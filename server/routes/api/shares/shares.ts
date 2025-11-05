@@ -91,7 +91,7 @@ router.post(
           collection: serializedCollection,
           document: serializedDocument,
         },
-        policies: presentPolicies(user, [share]),
+        policies: presentPolicies(user, [share, collection, document]),
       };
       return;
     }

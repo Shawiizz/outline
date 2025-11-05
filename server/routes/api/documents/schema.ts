@@ -154,13 +154,18 @@ export const DocumentsInfoSchema = BaseSchema.extend({
 export type DocumentsInfoReq = z.infer<typeof DocumentsInfoSchema>;
 
 export const DocumentsExportSchema = BaseSchema.extend({
-  body: BaseIdSchema,
+  body: BaseIdSchema.extend({
+    /** Optional shareId for public access */
+    shareId: z.string().optional(),
+  }),
 });
 
 export type DocumentsExportReq = z.infer<typeof DocumentsExportSchema>;
 
 export const DocumentsExportNestedSchema = BaseSchema.extend({
   body: BaseIdSchema.extend({
+    /** Optional shareId for public access */
+    shareId: z.string().optional(),
     /** Format for export (markdown, html, or pdf) */
     format: z.enum(["markdown", "html", "pdf"]).optional().default("markdown"),
     /** Optional list of document IDs to export (if not provided, exports all nested documents) */
