@@ -30,13 +30,13 @@ export class PdfGenerator {
       );
     }
 
-    // Generate HTML from the document with signed URLs for images (valid for 5 minutes)
+    // Generate HTML from the document with signed URLs for images (valid for 15 minutes)
     const html = await DocumentHelper.toHTML(document, {
       centered: true,
       includeMermaid: true,
       includeStyles: true,
       includeHead: true,
-      signedUrls: 300, // 5 minutes validity for signed attachment URLs
+      signedUrls: 900, // 15 minutes validity for signed attachment URLs
     });
 
     // Use provided browser or launch a new one
@@ -61,8 +61,22 @@ export class PdfGenerator {
 
       // Set content with full HTML
       await page.setContent(htmlWithRenderedMath, {
-        waitUntil: "networkidle0",
-        timeout: 180000, // 3 minutes timeout for documents with many images
+        waitUntil: "domcontentloaded", // Faster: wait for DOM only, not all network requests
+        timeout: 60000, // 1 minute should be enough
+      });
+
+      // Wait for images to load with a more practical timeout
+      await page.evaluate(() => {
+        // @ts-ignore - Running in browser context
+        return Promise.all(
+          Array.from(document.images)
+            .filter((img: any) => !img.complete)
+            .map((img: any) => new Promise((resolve) => {
+              img.onload = img.onerror = resolve;
+              // Fallback timeout per image
+              setTimeout(resolve, 10000);
+            }))
+        );
       });
 
       // Calculate page numbers for each heading
