@@ -2,6 +2,7 @@ import { setBlockType } from "prosemirror-commands";
 import { NodeSpec, NodeType, Node as ProsemirrorNode } from "prosemirror-model";
 import deleteEmptyFirstParagraph from "../commands/deleteEmptyFirstParagraph";
 import setParagraphAlignment from "../commands/setParagraphAlignment";
+import setParagraphIndent from "../commands/setParagraphIndent";
 import { MarkdownSerializerState } from "../lib/markdown/serializer";
 import Node from "./Node";
 import { EditorStyleHelper } from "../styles/EditorStyleHelper";
@@ -16,6 +17,9 @@ export default class Paragraph extends Node {
       attrs: {
         textAlign: {
           default: null,
+        },
+        indent: {
+          default: 0,
         },
       },
       content: "inline*",
@@ -35,6 +39,7 @@ export default class Paragraph extends Node {
 
             return {
               textAlign: dom.style.textAlign || null,
+              indent: parseInt(dom.getAttribute("data-indent") || "0", 10),
             };
           },
         },
@@ -44,8 +49,22 @@ export default class Paragraph extends Node {
           dir: "auto",
         };
 
+        // Add indent data attribute
+        if (node.attrs.indent) {
+          attrs["data-indent"] = node.attrs.indent;
+        }
+
+        // Build inline style for alignment and indentation
+        const styles: string[] = [];
         if (node.attrs.textAlign) {
-          attrs.style = `text-align: ${node.attrs.textAlign}`;
+          styles.push(`text-align: ${node.attrs.textAlign}`);
+        }
+        if (node.attrs.indent) {
+          const indentValue = node.attrs.indent * 2; // 2em per indent level
+          styles.push(`margin-left: ${indentValue}em`);
+        }
+        if (styles.length > 0) {
+          attrs.style = styles.join("; ");
         }
 
         return ["p", attrs, 0];
@@ -57,6 +76,8 @@ export default class Paragraph extends Node {
     return {
       "Shift-Ctrl-0": setBlockType(type),
       Backspace: deleteEmptyFirstParagraph,
+      Tab: setParagraphIndent("increase"),
+      "Shift-Tab": setParagraphIndent("decrease"),
     };
   }
 
@@ -65,6 +86,8 @@ export default class Paragraph extends Node {
       paragraph: () => setBlockType(type),
       setParagraphAlignment: ({ alignment }: { alignment: "left" | "center" | "right" | null }) =>
         setParagraphAlignment(alignment),
+      increaseParagraphIndent: () => setParagraphIndent("increase"),
+      decreaseParagraphIndent: () => setParagraphIndent("decrease"),
     };
   }
 

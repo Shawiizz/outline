@@ -84,7 +84,7 @@ export class PdfGenerator {
         // @ts-ignore - Running in browser context
         const tables = document.querySelectorAll('table');
         const maxWidth = 720; // A4 width minus margins in pixels (~170mm)
-        
+
         tables.forEach((table: any) => {
           const tableWidth = table.scrollWidth;
           if (tableWidth > maxWidth) {

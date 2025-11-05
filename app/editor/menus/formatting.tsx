@@ -187,6 +187,22 @@ export default function formattingMenuItems(
     },
     {
       name: "separator",
+      visible: isHeading || isParagraph,
+    },
+    {
+      name: isHeading ? "decreaseHeadingIndent" : "decreaseParagraphIndent",
+      tooltip: dictionary.outdent,
+      icon: <OutdentIcon />,
+      visible: isHeading || isParagraph,
+    },
+    {
+      name: isHeading ? "increaseHeadingIndent" : "increaseParagraphIndent",
+      tooltip: dictionary.indent,
+      icon: <IndentIcon />,
+      visible: isHeading || isParagraph,
+    },
+    {
+      name: "separator",
       visible: canAlign,
     },
     {
@@ -266,34 +282,18 @@ export default function formattingMenuItems(
       visible: !isCodeBlock && !isTableCell && (!isMobile || isEmpty),
     },
     {
-      name: "outdentList",
-      tooltip: dictionary.outdent,
-      shortcut: `⇧+Tab`,
-      icon: <OutdentIcon />,
-      visible:
-        isTouch && isInList(state, { types: ["ordered_list", "bullet_list"] }),
-    },
-    {
-      name: "indentList",
-      tooltip: dictionary.indent,
-      shortcut: `Tab`,
-      icon: <IndentIcon />,
-      visible:
-        isTouch && isInList(state, { types: ["ordered_list", "bullet_list"] }),
-    },
-    {
       name: "outdentCheckboxList",
       tooltip: dictionary.outdent,
       shortcut: `⇧+Tab`,
       icon: <OutdentIcon />,
-      visible: isTouch && isInList(state, { types: ["checkbox_list"] }),
+      visible: isInList(state, { types: ["checkbox_list"] }),
     },
     {
       name: "indentCheckboxList",
       tooltip: dictionary.indent,
       shortcut: `Tab`,
       icon: <IndentIcon />,
-      visible: isTouch && isInList(state, { types: ["checkbox_list"] }),
+      visible: isInList(state, { types: ["checkbox_list"] }),
     },
     {
       name: "separator",

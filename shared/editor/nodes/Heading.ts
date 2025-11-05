@@ -13,6 +13,7 @@ import { Primitive } from "utility-types";
 import Storage from "../../utils/Storage";
 import backspaceToParagraph from "../commands/backspaceToParagraph";
 import setHeadingAlignment from "../commands/setHeadingAlignment";
+import setHeadingIndent from "../commands/setHeadingIndent";
 import splitHeading from "../commands/splitHeading";
 import toggleBlockType from "../commands/toggleBlockType";
 import { headingToPersistenceKey } from "../lib/headingToSlug";
@@ -46,6 +47,9 @@ export default class Heading extends Node {
         textAlign: {
           default: null,
         },
+        indent: {
+          default: 0,
+        },
       },
       content: "inline*",
       group: "block",
@@ -56,6 +60,7 @@ export default class Heading extends Node {
         getAttrs: (node: HTMLElement) => ({
           level,
           textAlign: node.style.textAlign || null,
+          indent: parseInt(node.getAttribute("data-indent") || "0", 10),
         }),
         contentElement: (node: HTMLHeadingElement) =>
           node.querySelector(".heading-content") || node,
@@ -85,8 +90,22 @@ export default class Heading extends Node {
           dir: "auto",
         };
 
+        // Add indent data attribute
+        if (node.attrs.indent) {
+          attrs["data-indent"] = node.attrs.indent;
+        }
+
+        // Build inline style for alignment and indentation
+        const styles: string[] = [];
         if (node.attrs.textAlign) {
-          attrs.style = `text-align: ${node.attrs.textAlign}`;
+          styles.push(`text-align: ${node.attrs.textAlign}`);
+        }
+        if (node.attrs.indent) {
+          const indentValue = node.attrs.indent * 2; // 2em per indent level
+          styles.push(`margin-left: ${indentValue}em`);
+        }
+        if (styles.length > 0) {
+          attrs.style = styles.join("; ");
         }
 
         const contentAttrs: Record<string, any> = {
@@ -140,6 +159,8 @@ export default class Heading extends Node {
         toggleBlockType(type, schema.nodes.paragraph, attrs),
       setHeadingAlignment: ({ alignment }: { alignment: "left" | "center" | "right" | null }) =>
         setHeadingAlignment(alignment),
+      increaseHeadingIndent: () => setHeadingIndent("increase"),
+      decreaseHeadingIndent: () => setHeadingIndent("decrease"),
     };
   }
 
@@ -238,6 +259,8 @@ export default class Heading extends Node {
       ...options,
       Backspace: backspaceToParagraph(type),
       Enter: splitHeading(type),
+      Tab: setHeadingIndent("increase"),
+      "Shift-Tab": setHeadingIndent("decrease"),
     };
   }
 

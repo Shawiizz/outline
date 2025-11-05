@@ -442,6 +442,49 @@ width: 100%;
   h5 { font-size: 15px; }
   h6 { font-size: 15px; }
 
+  // Heading indentation support
+  h1[data-indent],
+  h2[data-indent],
+  h3[data-indent],
+  h4[data-indent],
+  h5[data-indent],
+  h6[data-indent] {
+    &[data-indent="1"] { margin-left: 2em; }
+    &[data-indent="2"] { margin-left: 4em; }
+    &[data-indent="3"] { margin-left: 6em; }
+    &[data-indent="4"] { margin-left: 8em; }
+    &[data-indent="5"] { margin-left: 10em; }
+    
+    &:dir(rtl) {
+      margin-left: 0;
+      &[data-indent="1"] { margin-right: 2em; }
+      &[data-indent="2"] { margin-right: 4em; }
+      &[data-indent="3"] { margin-right: 6em; }
+      &[data-indent="4"] { margin-right: 8em; }
+      &[data-indent="5"] { margin-right: 10em; }
+    }
+  }
+
+  // Paragraph indentation support
+  p[data-indent] {
+    &[data-indent="1"] { margin-left: 2em; }
+    &[data-indent="2"] { margin-left: 4em; }
+    &[data-indent="3"] { margin-left: 6em; }
+    &[data-indent="4"] { margin-left: 8em; }
+    &[data-indent="5"] { margin-left: 10em; }
+    
+    &:dir(rtl) {
+      margin-left: 0;
+      &[data-indent="1"] { margin-right: 2em; }
+      &[data-indent="2"] { margin-right: 4em; }
+      &[data-indent="3"] { margin-right: 6em; }
+      &[data-indent="4"] { margin-right: 8em; }
+      &[data-indent="5"] { margin-right: 10em; }
+    }
+  }
+
+
+
   .ProseMirror-yjs-selection {
     transition: background-color 500ms ease-in-out;
   }
