@@ -3,6 +3,7 @@ import katex from "katex";
 import { JSDOM } from "jsdom";
 import { codeToHtml } from "shiki";
 import { trace } from "@server/logging/tracing";
+import Logger from "@server/logging/Logger";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import Document from "@server/models/Document";
 
@@ -25,16 +26,14 @@ export class PdfGenerator {
       );
     }
 
-    // Generate HTML from the document
+    // Generate HTML from the document with signed URLs for images (valid for 5 minutes)
     const html = await DocumentHelper.toHTML(document, {
       centered: true,
       includeMermaid: true,
       includeStyles: true,
       includeHead: true,
+      signedUrls: 300, // 5 minutes validity for signed attachment URLs
     });
-
-    // Log a sample of the HTML to debug
-    console.log("HTML Sample (first 2000 chars):", html.substring(0, 2000));
 
     // Launch browser in headless mode
     const browser = await puppeteer.launch({
@@ -56,6 +55,7 @@ export class PdfGenerator {
       // Set content with full HTML
       await page.setContent(htmlWithRenderedMath, {
         waitUntil: "networkidle0",
+        timeout: 180000, // 3 minutes timeout for documents with many images
       });
 
       // Calculate page numbers for each heading
@@ -152,7 +152,7 @@ export class PdfGenerator {
         span.innerHTML = rendered;
         el.replaceWith(span);
       } catch (e) {
-        console.error('KaTeX inline render error:', e);
+        Logger.error('PDF: KaTeX inline render error', e);
       }
     });
 
@@ -170,7 +170,7 @@ export class PdfGenerator {
         div.innerHTML = rendered;
         el.replaceWith(div);
       } catch (e) {
-        console.error('KaTeX display render error:', e);
+        Logger.error('PDF: KaTeX display render error', e);
       }
     });
 
@@ -204,7 +204,7 @@ export class PdfGenerator {
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = highlighted;
         const highlightedPre = tempDiv.querySelector('pre');
-        
+
         if (highlightedPre) {
           // Preserve the code-block class for styling
           highlightedPre.classList.add('code-block');
@@ -212,7 +212,7 @@ export class PdfGenerator {
           block.replaceWith(highlightedPre);
         }
       } catch (e) {
-        console.error('Shiki syntax highlight error:', e);
+        Logger.error('PDF: Shiki syntax highlight error', e);
         // Keep original block if highlighting fails
       }
     }
@@ -314,250 +314,5 @@ export class PdfGenerator {
     }
 
     return dom.serialize();
-  }
-
-  /**
-   * Inject KaTeX scripts into HTML for math rendering
-   */
-  private static injectKatexScripts(html: string): string {
-    // Add KaTeX CSS and JS in the head
-    const katexHead = `
-      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
-      <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
-      <style>
-        @page {
-          margin: 15mm 20mm 25mm 20mm;
-        }
-      </style>
-    `;
-
-    // Add KaTeX rendering script before closing body tag
-    const katexScript = `
-      <script>
-        // Wait for KaTeX to load
-        function renderMath() {
-          if (typeof katex === 'undefined') {
-            setTimeout(renderMath, 100);
-            return;
-          }
-
-          console.log('KaTeX loaded, rendering math...');
-
-          // Render inline math
-          document.querySelectorAll('.math-inline').forEach(el => {
-            try {
-              const latex = el.textContent || '';
-              katex.render(latex, el, { throwOnError: false, displayMode: false });
-            } catch (e) {
-              console.error('KaTeX inline error:', e);
-            }
-          });
-
-          // Render display math
-          document.querySelectorAll('.math-display').forEach(el => {
-            try {
-              const latex = el.textContent || '';
-              katex.render(latex, el, { throwOnError: false, displayMode: true });
-            } catch (e) {
-              console.error('KaTeX display error:', e);
-            }
-          });
-
-          console.log('Math rendering complete');
-        }
-
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', renderMath);
-        } else {
-          renderMath();
-        }
-      </script>
-    `;
-
-    // Inject into HTML
-    let result = html.replace('</head>', katexHead + '</head>');
-    result = result.replace('</body>', katexScript + '</body>');
-
-    return result;
-  }
-
-  /**
-   * Wrap HTML content with proper styling for PDF export (legacy method, kept for compatibility)
-   */
-  private static wrapHtmlForPdf(content: string): string {
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <!-- KaTeX CSS for math rendering -->
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
-          <!-- KaTeX JS -->
-          <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
-          <!-- KaTeX auto-render -->
-          <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" integrity="sha384-+VBxd3r6XgURycqtZ117nYw44OOcIax56Z4dCRWbxyPt0Koah1uHoK0o4+/RRE05" crossorigin="anonymous"></script>
-          <style>
-            @page {
-              margin: 15mm 20mm 25mm 20mm;
-            }
-            
-            @page :first {
-              margin: 0mm 20mm 25mm 20mm;
-            }
-            
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-                sans-serif;
-              font-size: 16px;
-              line-height: 1.5;
-              color: #1f2937;
-              margin: 0;
-              padding: 0;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-
-            article {
-              max-width: 100%;
-              padding: 0;
-            }
-
-            h1, h2, h3, h4, h5, h6 {
-              font-weight: 500;
-              line-height: 1.25;
-              margin-top: 1em;
-              margin-bottom: 0.5em;
-              page-break-after: avoid;
-              break-after: avoid;
-            }
-
-            h1 { font-size: 36px; }
-            h2 { font-size: 26px; }
-            h3 { font-size: 20px; }
-            h4 { font-size: 18px; }
-            h5 { font-size: 16px; }
-            h6 { font-size: 14px; }
-
-            p, blockquote, pre, ul, ol, dl, table, figure {
-              page-break-inside: avoid;
-              break-inside: avoid;
-            }
-
-            img {
-              max-width: 100%;
-              height: auto;
-              page-break-inside: avoid;
-              break-inside: avoid;
-            }
-
-            pre {
-              background: #f3f4f6;
-              padding: 1em;
-              border-radius: 4px;
-              overflow-x: auto;
-            }
-
-            code {
-              background: #EDF2FA;
-              color: #4E5C6E;
-              padding: 0.2em 0.4em;
-              border-radius: 3px;
-              font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-              font-size: 0.85em;
-            }
-
-            pre code {
-              background: none;
-              padding: 0;
-              color: inherit;
-            }
-
-            /* KaTeX math styling */
-            .math-inline, .math-display {
-              font-size: 1em;
-            }
-
-            .math-display {
-              display: block;
-              margin: 1em 0;
-              text-align: center;
-            }
-
-            blockquote {
-              border-left: 3px solid #d1d5db;
-              padding-left: 1em;
-              margin-left: 0;
-              color: #6b7280;
-            }
-
-            table {
-              border-collapse: collapse;
-              width: 100%;
-              margin: 1em 0;
-            }
-
-            th, td {
-              border: 1px solid #d1d5db;
-              padding: 0.5em;
-              text-align: left;
-            }
-
-            th {
-              background: #f3f4f6;
-              font-weight: 600;
-            }
-
-            a {
-              color: #2563eb;
-              text-decoration: underline;
-            }
-
-            ul, ol {
-              padding-left: 2em;
-            }
-
-            li {
-              margin: 0.5em 0;
-            }
-          </style>
-        </head>
-        <body>
-          ${content}
-          <script>
-            // Initialize KaTeX rendering when scripts are loaded
-            document.addEventListener('DOMContentLoaded', () => {
-              // Render inline math
-              const inlineMath = document.querySelectorAll('.math-inline');
-              inlineMath.forEach(el => {
-                try {
-                  const latex = el.textContent || '';
-                  katex.render(latex, el, {
-                    throwOnError: false,
-                    displayMode: false
-                  });
-                } catch (e) {
-                  console.error('KaTeX inline render error:', e);
-                }
-              });
-
-              // Render display math
-              const displayMath = document.querySelectorAll('.math-display');
-              displayMath.forEach(el => {
-                try {
-                  const latex = el.textContent || '';
-                  katex.render(latex, el, {
-                    throwOnError: false,
-                    displayMode: true
-                  });
-                } catch (e) {
-                  console.error('KaTeX display render error:', e);
-                }
-              });
-            });
-          </script>
-        </body>
-      </html>
-    `;
   }
 }
