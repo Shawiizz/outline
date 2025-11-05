@@ -79,6 +79,23 @@ export class PdfGenerator {
         );
       });
 
+      // Auto-scale tables that are too wide for the page
+      await page.evaluate(() => {
+        // @ts-ignore - Running in browser context
+        const tables = document.querySelectorAll('table');
+        const maxWidth = 720; // A4 width minus margins in pixels (~170mm)
+        
+        tables.forEach((table: any) => {
+          const tableWidth = table.scrollWidth;
+          if (tableWidth > maxWidth) {
+            const scale = maxWidth / tableWidth;
+            table.style.transform = `scale(${scale})`;
+            table.style.transformOrigin = 'top left';
+            table.style.marginBottom = `${table.offsetHeight * (1 - scale)}px`;
+          }
+        });
+      });
+
       // Calculate page numbers for each heading
       await this.injectPageNumbers(page);
 
@@ -362,6 +379,28 @@ export class PdfGenerator {
           border-radius: 3px !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
+        }
+
+        /* Tables - prevent overflow and auto-scale if too wide */
+        table {
+          max-width: 100% !important;
+          width: auto !important;
+          table-layout: auto !important;
+          font-size: 12px !important;
+        }
+
+        /* Wrapper for tables to handle overflow */
+        .table-wrapper, div:has(> table) {
+          max-width: 100% !important;
+          overflow: visible !important;
+        }
+
+        table td, table th {
+          word-wrap: break-word !important;
+          word-break: break-word !important;
+          max-width: 200px !important;
+          font-size: 11px !important;
+          padding: 6px 8px !important;
         }
       `;
       head.appendChild(style);
