@@ -79,6 +79,10 @@ class Share extends Model implements Searchable {
   @observable
   showTOC: boolean;
 
+  @Field
+  @observable
+  allowPublicEdit: boolean;
+
   @observable
   views: number;
 

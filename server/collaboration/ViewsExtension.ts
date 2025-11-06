@@ -8,6 +8,7 @@ import Logger from "@server/logging/Logger";
 import { trace } from "@server/logging/tracing";
 import { View } from "@server/models";
 import { withContext } from "./types";
+import { isAnonymousUserId } from "@shared/utils/anonymousNames";
 
 @trace()
 export class ViewsExtension implements Extension {
@@ -28,6 +29,11 @@ export class ViewsExtension implements Extension {
     socketId,
   }: withContext<onChangePayload>) {
     if (!context.user) {
+      return;
+    }
+
+    // Skip view tracking for anonymous users
+    if (isAnonymousUserId(context.user.id)) {
       return;
     }
 

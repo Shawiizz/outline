@@ -4,8 +4,8 @@ import { TextHelper } from "@server/models/helpers/TextHelper";
 import { APIContext } from "@server/types";
 
 type Props = {
-  /** The user updating the document */
-  user: User;
+  /** The user updating the document (null for anonymous public editing) */
+  user: User | null;
   /** The existing document */
   document: Document;
   /** The new title */
@@ -86,11 +86,15 @@ export default async function documentUpdater(
     document.insightsEnabled = insightsEnabled;
   }
   if (text !== undefined) {
+    const processedText = user
+      ? await TextHelper.replaceImagesWithAttachments(ctx, text, user, {
+        base64Only: true,
+      })
+      : text; // For anonymous users, don't process image attachments
+
     document = DocumentHelper.applyMarkdownToDocument(
       document,
-      await TextHelper.replaceImagesWithAttachments(ctx, text, user, {
-        base64Only: true,
-      }),
+      processedText,
       append
     );
   }
@@ -107,7 +111,8 @@ export default async function documentUpdater(
     },
   };
 
-  if (publish && (document.template || cId)) {
+  // Anonymous users cannot publish documents
+  if (publish && user && (document.template || cId)) {
     if (!document.collectionId) {
       document.collectionId = cId;
     }
@@ -118,12 +123,18 @@ export default async function documentUpdater(
       name: "documents.publish",
     });
   } else if (changed) {
-    document.lastModifiedById = user.id;
-    document.updatedBy = user;
+    // For anonymous users, keep the original lastModifiedById
+    if (user) {
+      document.lastModifiedById = user.id;
+      document.updatedBy = user;
+    }
     await document.save({ transaction });
 
-    await Event.createFromContext(ctx, event);
-  } else if (done) {
+    // Only create events for authenticated users
+    if (user) {
+      await Event.createFromContext(ctx, event);
+    }
+  } else if (done && user) {
     await Event.schedule({
       ...event,
       actorId: user.id,
@@ -131,7 +142,7 @@ export default async function documentUpdater(
     });
   }
 
-  if (document.title !== previousTitle) {
+  if (document.title !== previousTitle && user) {
     await Event.schedule({
       name: "documents.title_change",
       documentId: document.id,
@@ -143,6 +154,14 @@ export default async function documentUpdater(
         title: document.title,
       },
       ip: ctx.request.ip,
+    });
+  }
+
+  // For anonymous users, return the document without user-specific scopes
+  if (!user) {
+    return await Document.findByPk(document.id, {
+      rejectOnEmpty: true,
+      transaction,
     });
   }
 

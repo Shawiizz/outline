@@ -26,6 +26,10 @@ import {
   loadPublicShare,
   loadShareWithParent,
 } from "@server/commands/shareLoader";
+import {
+  collaborationServer,
+  publicEditGuardExtension
+} from "@server/services/collaboration";
 
 const router = new Router();
 
@@ -65,17 +69,17 @@ router.post(
         await Promise.all([
           collection
             ? await presentCollection(ctx, collection, {
-                isPublic: cannot(user, "read", collection),
-                shareId: share.id,
-                includeUpdatedAt: share.showLastUpdated,
-              })
+              isPublic: cannot(user, "read", collection),
+              shareId: share.id,
+              includeUpdatedAt: share.showLastUpdated,
+            })
             : null,
           document
             ? await presentDocument(ctx, document, {
-                isPublic: cannot(user, "read", document),
-                shareId: share.id,
-                includeUpdatedAt: share.showLastUpdated,
-              })
+              isPublic: cannot(user, "read", document),
+              shareId: share.id,
+              includeUpdatedAt: share.showLastUpdated,
+            })
             : null,
           presentPublicTeam(
             team,
@@ -245,19 +249,20 @@ router.post(
       allowIndexing,
       showLastUpdated,
       showTOC,
+      allowPublicEdit,
     } = ctx.input.body;
     const { user } = ctx.state.auth;
     authorize(user, "createShare", user.team);
 
     const collection = collectionId
       ? await Collection.findByPk(collectionId, {
-          userId: user.id,
-        })
+        userId: user.id,
+      })
       : null;
     const document = documentId
       ? await Document.findByPk(documentId, {
-          userId: user.id,
-        })
+        userId: user.id,
+      })
       : null;
 
     // user could be creating the share link to share with team members
@@ -282,6 +287,7 @@ router.post(
         allowIndexing,
         showLastUpdated,
         showTOC,
+        allowPublicEdit,
         urlId,
       },
     });
@@ -312,6 +318,7 @@ router.post(
       allowIndexing,
       showLastUpdated,
       showTOC,
+      allowPublicEdit,
     } = ctx.input.body;
 
     const { user } = ctx.state.auth;
@@ -349,7 +356,25 @@ router.post(
       share.showTOC = showTOC;
     }
 
+    let permissionChanged = false;
+    let wasAllowingPublicEdit = false;
+
+    if (allowPublicEdit !== undefined) {
+      wasAllowingPublicEdit = share.allowPublicEdit;
+      permissionChanged = wasAllowingPublicEdit !== allowPublicEdit;
+      share.allowPublicEdit = allowPublicEdit;
+    }
+
     await share.saveWithCtx(ctx);
+
+    // AFTER saving, check if we need to update permissions for connected users
+    if (permissionChanged && collaborationServer && publicEditGuardExtension && share.documentId) {
+      await publicEditGuardExtension.forcePermissionCheck(
+        share.documentId,
+        collaborationServer,
+        share.allowPublicEdit // Pass the new value directly
+      );
+    }
 
     ctx.body = {
       data: presentShare(share, user.isAdmin),

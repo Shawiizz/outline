@@ -2,6 +2,10 @@ import invariant from "invariant";
 import filter from "lodash/filter";
 import { DocumentPermission, TeamPreference } from "@shared/types";
 import { Document, Revision, User, Team } from "@server/models";
+import {
+  canEditDocumentPublicly,
+  canEditDocumentCollectionPublicly,
+} from "@server/utils/publicEdit";
 import { allow, cannot, can } from "./cancan";
 import { and, isTeamAdmin, isTeamModel, isTeamMutable, or } from "./utils";
 
@@ -15,8 +19,18 @@ allow(User, "createDocument", Team, (actor, document) =>
   )
 );
 
-allow(User, "read", Document, (actor, document) =>
-  and(
+allow(User, "read", Document, async (actor, document) => {
+  // Allow reading if document is publicly shared with edit access (even for anonymous users)
+  if (document) {
+    if (
+      (await canEditDocumentPublicly(document.id)) ||
+      (await canEditDocumentCollectionPublicly(document))
+    ) {
+      return true;
+    }
+  }
+
+  return and(
     isTeamModel(actor, document),
     or(
       includesMembership(document, [
@@ -31,8 +45,8 @@ allow(User, "read", Document, (actor, document) =>
       ),
       can(actor, "readDocument", document?.collection)
     )
-  )
-);
+  );
+});
 
 allow(User, ["listRevisions", "listViews"], Document, (actor, document) =>
   or(
@@ -87,8 +101,18 @@ allow(User, "share", Document, (actor, document) =>
   )
 );
 
-allow(User, "update", Document, (actor, document) =>
-  and(
+allow(User, "update", Document, async (actor, document) => {
+  // Allow updating if document is publicly shared with edit access (even for anonymous users)
+  if (document) {
+    if (
+      (await canEditDocumentPublicly(document.id)) ||
+      (await canEditDocumentCollectionPublicly(document))
+    ) {
+      return !!document.isActive;
+    }
+  }
+
+  return and(
     can(actor, "read", document),
     isTeamMutable(actor),
     !!document?.isActive,
@@ -109,8 +133,8 @@ allow(User, "update", Document, (actor, document) =>
         )
       )
     )
-  )
-);
+  );
+});
 
 allow(User, "publish", Document, (actor, document) =>
   and(

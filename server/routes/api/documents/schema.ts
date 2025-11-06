@@ -277,6 +277,9 @@ export const DocumentsUpdateSchema = BaseSchema.extend({
 
     /** Whether the editing session is complete */
     done: z.boolean().optional(),
+
+    /** Share ID for public editing */
+    shareId: z.string().uuid().optional(),
   }),
 }).refine((req) => !(req.body.append && !req.body.text), {
   message: "text is required while appending",

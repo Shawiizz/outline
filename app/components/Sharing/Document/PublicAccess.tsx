@@ -90,6 +90,22 @@ function PublicAccess({ document, share, sharedParent }: Props) {
     [share]
   );
 
+  const handleAllowPublicEditChanged = React.useCallback(
+    async (checked: boolean) => {
+      try {
+        await share?.save({
+          allowPublicEdit: checked,
+          // When enabling public editing, always show last modified
+          // (required so anonymous users see the latest version)
+          ...(checked && { showLastUpdated: true }),
+        });
+      } catch (err) {
+        toast.error(err.message);
+      }
+    },
+    [share]
+  );
+
   const handlePublishedChange = React.useCallback(
     async (checked: boolean) => {
       try {
@@ -249,6 +265,7 @@ function PublicAccess({ document, share, sharedParent }: Props) {
                   aria-label={t("Show last modified")}
                   checked={share?.showLastUpdated ?? false}
                   onChange={handleShowLastModifiedChanged}
+                  disabled={share?.allowPublicEdit ?? false}
                   width={26}
                   height={14}
                 />
@@ -274,6 +291,31 @@ function PublicAccess({ document, share, sharedParent }: Props) {
                   aria-label={t("Show table of contents")}
                   checked={share?.showTOC ?? false}
                   onChange={handleShowTOCChanged}
+                  width={26}
+                  height={14}
+                />
+              }
+            />
+            <ListItem
+              title={
+                <Text type="tertiary" as={Flex}>
+                  {t("Allow public editing")}&nbsp;
+                  <Tooltip
+                    content={t(
+                      "Allow anyone with the link to edit the document without signing in"
+                    )}
+                  >
+                    <NudeButton size={18}>
+                      <QuestionMarkIcon size={18} />
+                    </NudeButton>
+                  </Tooltip>
+                </Text>
+              }
+              actions={
+                <Switch
+                  aria-label={t("Allow public editing")}
+                  checked={share?.allowPublicEdit ?? false}
+                  onChange={handleAllowPublicEditChanged}
                   width={26}
                   height={14}
                 />

@@ -8,6 +8,7 @@ import { Document, Event } from "@server/models";
 import { sequelize } from "@server/storage/database";
 import { AuthenticationType } from "@server/types";
 import semver from "semver";
+import { isAnonymousUserId } from "@shared/utils/anonymousNames";
 
 type Props = {
   /** The document ID to update. */
@@ -49,9 +50,15 @@ export default async function documentCollaborativeUpdater({
     const content = yDocToProsemirrorJSON(ydoc, "default") as ProsemirrorData;
     const isUnchanged = isEqual(document.content, content);
     const isDeleted = !!document.deletedAt;
+
+    // Filter out anonymous users who cannot be stored in the database
+    const realCollaboratorIds = sessionCollaboratorIds.filter(
+      id => !isAnonymousUserId(id)
+    );
+
     const lastModifiedById = isDeleted
       ? document.lastModifiedById
-      : (sessionCollaboratorIds[sessionCollaboratorIds.length - 1] ??
+      : (realCollaboratorIds[realCollaboratorIds.length - 1] ??
         document.lastModifiedById);
 
     if (isUnchanged) {
@@ -65,10 +72,12 @@ export default async function documentCollaborativeUpdater({
 
     // extract collaborators from doc user data
     const pud = new Y.PermanentUserData(ydoc);
-    const pudIds = Array.from(pud.clients.values());
+    const pudIds = Array.from(pud.clients.values()).filter(
+      id => !isAnonymousUserId(id)
+    );
     const collaboratorIds = uniq([
       ...document.collaboratorIds,
-      ...sessionCollaboratorIds,
+      ...realCollaboratorIds,
       ...pudIds,
     ]);
 
@@ -97,18 +106,21 @@ export default async function documentCollaborativeUpdater({
       }
     );
 
-    await Event.schedule({
-      name: "documents.update",
-      documentId: document.id,
-      collectionId: document.collectionId,
-      teamId: document.teamId,
-      actorId: lastModifiedById,
-      authType: AuthenticationType.APP,
-      data: {
-        multiplayer: true,
-        title: document.title,
-        done: isLastConnection,
-      },
-    });
+    // Only create events for real users, not anonymous ones
+    if (realCollaboratorIds.length > 0) {
+      await Event.schedule({
+        name: "documents.update",
+        documentId: document.id,
+        collectionId: document.collectionId,
+        teamId: document.teamId,
+        actorId: lastModifiedById,
+        authType: AuthenticationType.APP,
+        data: {
+          multiplayer: true,
+          title: document.title,
+          done: isLastConnection,
+        },
+      });
+    }
   });
 }

@@ -117,6 +117,11 @@ function DocumentHeader({
     (ui.tocVisible === true && !document.isTemplate) ||
     (isShare && ui.tocVisible !== false);
 
+  // Get share info to check multiplayer settings
+  const { shares } = useStores();
+  const share = shareId ? shares.getByDocumentId(document.id) : undefined;
+  const showCollaborators = !isShare || (!!share && (share.showLastUpdated || share.allowPublicEdit));
+
   const toc = (
     <Tooltip
       content={
@@ -202,6 +207,13 @@ function DocumentHeader({
         actions={
           <>
             <AppearanceAction />
+            {showCollaborators && (
+              <Collaborators
+                document={document}
+                shareId={shareId}
+                limit={isMobile ? 2 : undefined}
+              />
+            )}
             <Action>
               <SharedDocumentMenu
                 document={document}
@@ -251,9 +263,10 @@ function DocumentHeader({
             {!isPublishing && isSaving && user?.separateEditMode && (
               <Status>{t("Saving")}…</Status>
             )}
-            {!isDeleted && !isRevision && can.listViews && (
+            {!isDeleted && !isRevision && can.listViews && showCollaborators && (
               <Collaborators
                 document={document}
+                shareId={shareId}
                 limit={isCompact ? 3 : undefined}
               />
             )}
@@ -349,7 +362,7 @@ function DocumentHeader({
   );
 }
 
-const StyledHeader = styled(Header)<{ $hidden: boolean }>`
+const StyledHeader = styled(Header) <{ $hidden: boolean }>`
   transition: opacity 500ms ease-in-out;
   ${(props) => props.$hidden && "opacity: 0;"}
 `;

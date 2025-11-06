@@ -18,6 +18,7 @@ import {
   EditorUpdateError,
 } from "@shared/collaboration/CloseEvents";
 import EDITOR_VERSION from "@shared/editor/version";
+import { generateAnonymousName } from "@shared/utils/anonymousNames";
 import { supportsPassiveListener } from "@shared/utils/browser";
 import Editor, { Props as EditorProps } from "~/components/Editor";
 import MultiplayerExtension from "~/editor/extensions/Multiplayer";
@@ -55,7 +56,7 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
   const documentId = props.id;
   const history = useHistory();
   const { t } = useTranslation();
-  const currentUser = useCurrentUser();
+  const currentUser = useCurrentUser({ rejectOnEmpty: false });
   const { presence, auth, ui } = useStores();
   const [editorVersionBehind, setEditorVersionBehind] = useState(false);
   const [showCursorNames, setShowCursorNames] = useState(false);
@@ -64,10 +65,41 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
   const [isLocalSynced, setLocalSynced] = useState(false);
   const [isRemoteSynced, setRemoteSynced] = useState(false);
   const [ydoc] = useState(() => new Y.Doc());
-  const token = auth.collaborationToken;
+  // Use shareId as token for anonymous public editing, otherwise use collaboration token
+  const token = (props as any).shareId || auth.collaborationToken;
   const isIdle = useIdle();
   const isVisible = usePageVisibility();
   const isMounted = useIsMounted();
+
+  // Define user before useLayoutEffect so it can be used in provider setup
+  const user = useMemo(() => {
+    if (currentUser) {
+      return {
+        id: currentUser.id,
+        name: currentUser.name,
+        color: currentUser.color,
+      };
+    }
+
+    // For anonymous users, generate a name and color based on shareId
+    // This will be consistent for the same share link
+    const shareId = (props as any).shareId;
+    if (shareId) {
+      const { name, color } = generateAnonymousName(shareId);
+      return {
+        id: `anonymous-${shareId}`,
+        name,
+        color,
+      };
+    }
+
+    // Fallback
+    return {
+      id: "anonymous",
+      name: "Anonymous Editor",
+      color: "#9E9E9E",
+    };
+  }, [currentUser, (props as any).shareId]);
 
   // Provider initialization must be within useLayoutEffect rather than useState
   // or useMemo as both of these are ran twice in React StrictMode resulting in
@@ -87,11 +119,20 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
       token,
     });
 
+    // Set awareness user immediately after provider creation, before connection
+    // But only if we're not in read-only mode (to avoid showing presence for viewers)
+    if (!props.readOnly) {
+      provider.setAwarenessField("user", user);
+    }
+
     const syncScrollPosition = throttle(() => {
-      provider.setAwarenessField(
-        "scrollY",
-        window.scrollY / window.innerHeight
-      );
+      // Don't sync scroll position if we're in read-only mode
+      if (!props.readOnly) {
+        provider.setAwarenessField(
+          "scrollY",
+          window.scrollY / window.innerHeight
+        );
+      }
     }, 250);
 
     const finishObserving = () => {
@@ -115,10 +156,28 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
     });
 
     provider.on("awarenessChange", (event: AwarenessChangeEvent) => {
+      // Get all states from awareness including empty ones to detect disconnections
+      const awarenessStates = provider.awareness.getStates();
+      const allStates = Array.from(awarenessStates.entries())
+        .map(([clientId, state]: [number, any]) => ({
+          clientId,
+          user: state.user,
+          cursor: state.cursor,
+          scrollY: state.scrollY,
+        }));
+
+      // Separate states with user info (connected) from empty states (disconnected)
+      const connectedStates = allStates.filter((state) => state.user);
+      const allClientIds = new Set(allStates.map(s => s.clientId));
+
       presence.updateFromAwarenessChangeEvent(
         documentId,
         provider.awareness.clientID,
-        event
+        {
+          ...event,
+          states: connectedStates, // Pass only states with user info
+        },
+        allClientIds // Pass all client IDs to detect disconnections
       );
 
       event.states.forEach(({ user, scrollY }) => {
@@ -149,7 +208,9 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
       setLocalSynced(!!ydoc.get("default")._start)
     );
     provider.on("synced", () => {
-      presence.touch(documentId, currentUser.id, false);
+      if (currentUser) {
+        presence.touch(documentId, currentUser.id, false);
+      }
       setRemoteSynced(true);
     });
 
@@ -192,6 +253,58 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
       }
     });
 
+    // Listen for permission changes via WebSocket messages
+    const handleWebSocketMessage = (event: any) => {
+      try {
+        if (typeof event.data !== 'string') {
+          return;
+        }
+
+        let message;
+        try {
+          message = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (message && message.type === 'outline-permission-change') {
+          const { allowPublicEdit } = message;
+
+          if (!allowPublicEdit && !currentUser) {
+            toast.info(
+              t("Public editing has been disabled. The page will reload in read-only mode.")
+            );
+
+            // Clear local IndexedDB storage to prevent stale edits
+            const dbName = `document.${documentId}`;
+            if (indexedDB) {
+              indexedDB.deleteDatabase(dbName);
+            }
+
+            setTimeout(() => {
+              window.location.reload();
+            }, 2000);
+          } else if (allowPublicEdit && !currentUser) {
+            toast.success(
+              t("Public editing has been enabled. The page will reload to enable editing.")
+            );
+
+            setTimeout(() => {
+              window.location.reload();
+            }, 2000);
+          }
+        }
+      } catch (error) {
+        Logger.error("Failed to process WebSocket message", error);
+      }
+    };
+
+    // Access the underlying WebSocket and add our listener
+    const ws = (provider as any).webSocket || (provider as any).ws;
+    if (ws) {
+      ws.addEventListener('message', handleWebSocketMessage);
+    }
+
     setRemoteProvider(provider);
 
     return () => {
@@ -211,19 +324,11 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
     presence,
     ydoc,
     token,
-    currentUser.id,
+    currentUser?.id,
     isMounted,
     auth,
+    user,
   ]);
-
-  const user = useMemo(
-    () => ({
-      id: currentUser.id,
-      name: currentUser.name,
-      color: currentUser.color,
-    }),
-    [currentUser.id, currentUser.color, currentUser.name]
-  );
 
   const extensions = useMemo(() => {
     if (!remoteProvider) {
@@ -318,9 +423,9 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
         style={
           showCache
             ? {
-                height: 0,
-                opacity: 0,
-              }
+              height: 0,
+              opacity: 0,
+            }
             : undefined
         }
         className={showCursorNames ? "show-cursor-names" : undefined}

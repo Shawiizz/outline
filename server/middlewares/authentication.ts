@@ -126,6 +126,22 @@ export function parseAuthentication(ctx: AppContext): AuthInput {
       token: String(ctx.request.query.token),
       transport: "query",
     };
+  } else if (
+    ctx.request.body &&
+    typeof ctx.request.body === "object" &&
+    "shareId" in ctx.request.body
+  ) {
+    // Allow authentication via shareId for public editing
+    return {
+      token: String(ctx.request.body.shareId),
+      transport: "body",
+    };
+  } else if (ctx.request.query?.shareId) {
+    // Allow authentication via shareId in query params
+    return {
+      token: String(ctx.request.query.shareId),
+      transport: "query",
+    };
   } else {
     const accessToken = ctx.cookies.get("accessToken");
     if (accessToken) {

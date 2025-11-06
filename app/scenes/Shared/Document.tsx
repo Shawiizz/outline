@@ -1,12 +1,14 @@
 import { observer } from "mobx-react";
 import { NavigationNode, PublicTeam, TOCPosition } from "@shared/types";
 import DocumentModel from "~/models/Document";
+import Share from "~/models/Share";
 import DocumentComponent from "~/scenes/Document/components/Document";
 import { useDocumentContext } from "~/components/DocumentContext";
 import { useTeamContext } from "~/components/TeamContext";
 import { useMemo } from "react";
 import { parseDomain } from "@shared/utils/domains";
 import useCurrentUser from "~/hooks/useCurrentUser";
+import useStores from "~/hooks/useStores";
 import Branding from "~/components/Branding";
 
 type Props = {
@@ -16,6 +18,8 @@ type Props = {
 };
 
 function SharedDocument({ document, shareId, sharedTree }: Props) {
+  const { shares } = useStores();
+  const share = shares.get(shareId);
   const team = useTeamContext() as PublicTeam | undefined;
   const user = useCurrentUser({ rejectOnEmpty: false });
   const { hasHeadings, setDocument } = useDocumentContext();
@@ -25,6 +29,9 @@ function SharedDocument({ document, shareId, sharedTree }: Props) {
     []
   );
   const showBranding = !isCustomDomain && !user;
+
+  // Allow editing if the share has allowPublicEdit enabled
+  const readOnly = !share?.allowPublicEdit;
 
   const tocPosition = hasHeadings
     ? (team?.tocPosition ?? TOCPosition.Left)
@@ -39,7 +46,7 @@ function SharedDocument({ document, shareId, sharedTree }: Props) {
         sharedTree={sharedTree}
         shareId={shareId}
         tocPosition={tocPosition}
-        readOnly
+        readOnly={readOnly}
       />
       {showBranding ? (
         <Branding href="//www.getoutline.com?ref=sharelink" />

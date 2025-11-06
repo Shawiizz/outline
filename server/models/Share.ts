@@ -154,6 +154,10 @@ class Share extends IdModel<
   @Column
   showTOC: boolean;
 
+  @Default(false)
+  @Column
+  allowPublicEdit: boolean;
+
   // hooks
 
   @BeforeUpdate

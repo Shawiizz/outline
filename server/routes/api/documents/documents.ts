@@ -26,6 +26,7 @@ import env from "@server/env";
 import {
   InvalidRequestError,
   AuthenticationError,
+  AuthorizationError,
   ValidationError,
   IncorrectEditionError,
   NotFoundError,
@@ -1030,11 +1031,11 @@ router.post(
     // Use client-provided export ID or generate a new one
     const exportId = clientExportId || randomUUID();
     const progressKey = `export:progress:${exportId}`;
-    
+
     try {
       // Collect all promises for attachments to ensure they're all resolved before streaming
       const attachmentPromises: Promise<void>[] = [];
-      
+
       const totalDocs = documentPaths.size;
       let processedDocs = 0;
 
@@ -1092,7 +1093,7 @@ router.post(
               });
               return Buffer.from("");
             });
-            
+
             attachmentPromises.push(
               bufferPromise.then((buffer) => {
                 zip.file(
@@ -1145,7 +1146,7 @@ router.post(
               });
               return Buffer.from("");
             });
-            
+
             attachmentPromises.push(
               bufferPromise.then((buffer) => {
                 zip.file(
@@ -1214,7 +1215,7 @@ router.post(
   auth(),
   async (ctx: APIContext) => {
     const { exportId } = ctx.request.body as { exportId: string };
-    
+
     if (!exportId) {
       throw InvalidRequestError("exportId is required");
     }
@@ -1626,16 +1627,69 @@ router.post(
 
 router.post(
   "documents.update",
-  auth(),
+  auth({ optional: true }),
   validate(T.DocumentsUpdateSchema),
   transaction(),
   async (ctx: APIContext<T.DocumentsUpdateReq>) => {
     const { transaction } = ctx.state;
-    const { id, insightsEnabled, publish, collectionId, ...input } =
+    const { id, insightsEnabled, publish, collectionId, shareId, ...input } =
       ctx.input.body;
     const editorVersion = ctx.headers["x-editor-version"] as string | undefined;
 
     const { user } = ctx.state.auth;
+
+    // Handle public editing via shareId
+    if (!user && shareId) {
+      // Verify the share allows public editing
+      const share = await Share.findOne({
+        where: {
+          id: shareId,
+          documentId: id,
+          published: true,
+          revokedAt: null,
+        },
+        transaction,
+      });
+
+      if (!share || !share.allowPublicEdit) {
+        throw AuthenticationError("Invalid share or public editing not allowed");
+      }
+
+      // For public editing, only allow text updates, no other changes
+      if (insightsEnabled !== undefined || publish || collectionId) {
+        throw AuthorizationError("Public editing only allows content updates");
+      }
+
+      // Fetch the document without user context
+      let document = await Document.findByPk(id, {
+        includeState: true,
+        transaction,
+      });
+
+      if (!document || !document.isActive) {
+        throw NotFoundError("Document not found");
+      }
+
+      // Update the document with anonymous user context
+      document = await documentUpdater(ctx, {
+        document,
+        user: null as any, // Anonymous user
+        ...input,
+        editorVersion,
+      });
+
+      ctx.body = {
+        data: await presentDocument(ctx, document),
+        policies: [], // Empty policies array for anonymous users
+      };
+      return;
+    }
+
+    // Normal authenticated flow
+    if (!user) {
+      throw AuthenticationError("Authentication required");
+    }
+
     let collection: Collection | null | undefined;
 
     let document = await Document.findByPk(id, {

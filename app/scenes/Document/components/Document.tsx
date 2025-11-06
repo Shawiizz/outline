@@ -447,6 +447,7 @@ class DocumentScene extends React.Component<Props> {
       abilities,
       auth,
       ui,
+      shares,
       shareId,
       tocPosition,
       t,
@@ -455,6 +456,10 @@ class DocumentScene extends React.Component<Props> {
     const isShare = !!shareId;
     const embedsDisabled =
       (team && team.documentEmbeds === false) || document.embedsDisabled;
+
+    // Check if this is a public share with editing enabled
+    const share = shareId ? shares.get(shareId) : undefined;
+    const isPublicEditableShare = share?.allowPublicEdit ?? false;
 
     const tocPos =
       tocPosition ??
@@ -470,8 +475,16 @@ class DocumentScene extends React.Component<Props> {
         ? EditorStyleHelper.tocWidth / -2
         : EditorStyleHelper.tocWidth / 2;
 
+    // Enable multiplayer for:
+    // - Normal authenticated editing (not archived, deleted, or viewing revision)
+    // - Public shares with showLastUpdated enabled (to see live updates)
+    // - Public shares with allowPublicEdit enabled (to enable collaboration)
+    // When showLastUpdated is false, display a static revision instead of live document
     const multiplayerEditor =
-      !document.isArchived && !document.isDeleted && !revision && !isShare;
+      !document.isArchived &&
+      !document.isDeleted &&
+      !revision &&
+      (!isShare || (!!share && (share.showLastUpdated || share.allowPublicEdit)));
 
     const canonicalUrl = shareId
       ? this.props.match.url
@@ -722,10 +735,10 @@ const EditorContainer = styled.div<EditorContainerProps>`
 
     // Decides the editor column position & span
     grid-column: ${({
-      docFullWidth,
-      showContents,
-      tocPosition,
-    }: EditorContainerProps) =>
+  docFullWidth,
+  showContents,
+  tocPosition,
+}: EditorContainerProps) =>
       docFullWidth
         ? showContents
           ? tocPosition === TOCPosition.Left

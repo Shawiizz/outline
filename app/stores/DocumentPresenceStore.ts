@@ -1,4 +1,4 @@
-import { observable, action } from "mobx";
+import { observable, action, runInAction } from "mobx";
 import { AwarenessChangeEvent } from "~/types";
 import RootStore from "./RootStore";
 
@@ -7,6 +7,8 @@ type DocumentPresence = Map<
   {
     isEditing: boolean;
     userId: string;
+    userName?: string;
+    userColor?: string;
   }
 >;
 
@@ -39,33 +41,37 @@ export default class PresenceStore {
    * @param documentId ID of the document the event is for
    * @param clientId ID of the client the event is for
    * @param event The awareness event
+   * @param allClientIds Optional set of all client IDs currently in awareness (for detecting disconnections)
    */
   public updateFromAwarenessChangeEvent(
     documentId: string,
     clientId: number,
-    event: AwarenessChangeEvent
+    event: AwarenessChangeEvent,
+    allClientIds?: Set<number>
   ) {
-    const presence = this.data.get(documentId);
-    let existingUserIds = (presence ? Array.from(presence.values()) : []).map(
-      (p) => p.userId
-    );
+    // Use runInAction to batch all presence updates into a single MobX transaction
+    // This prevents the component from re-rendering between each state update
+    runInAction(() => {
+      const presence = this.data.get(documentId);
+      let existingUserIds = (presence ? Array.from(presence.values()) : []).map(
+        (p) => p.userId
+      );
 
-    event.states.forEach((state) => {
-      const { user, cursor } = state;
+      event.states.forEach((state) => {
+        const { user, cursor } = state;
 
-      // To avoid loops we only want to update the presence for the current user
-      // if it is also the current client.
-      const isCurrentUser = this.rootStore.auth.currentUserId === user?.id;
-      const isCurrentClient = clientId === state.clientId;
+        // Update presence for all users, including the current user
+        if (user) {
+          this.update(documentId, user.id, !!cursor, user.name, user.color);
+          existingUserIds = existingUserIds.filter((id) => id !== user.id);
+        }
+      });
 
-      if (user && (!isCurrentUser || !isCurrentClient)) {
-        this.update(documentId, user.id, !!cursor);
-        existingUserIds = existingUserIds.filter((id) => id !== user.id);
-      }
-    });
-
-    existingUserIds.forEach((userId) => {
-      this.leave(documentId, userId);
+      // Remove users that are no longer present
+      // If we have allClientIds, we can be more accurate about disconnections
+      existingUserIds.forEach((userId) => {
+        this.leave(documentId, userId);
+      });
     });
   }
 
@@ -76,8 +82,10 @@ export default class PresenceStore {
    * @param documentId ID of the document to update
    * @param userId ID of the user to update
    * @param isEditing Whether the user is "editing" the document
+   * @param userName Optional user name (for anonymous users)
+   * @param userColor Optional user color (for anonymous users)
    */
-  public touch(documentId: string, userId: string, isEditing: boolean) {
+  public touch(documentId: string, userId: string, isEditing: boolean, userName?: string, userColor?: string) {
     const id = `${documentId}-${userId}`;
     let timeout = this.timeouts.get(id);
 
@@ -86,7 +94,7 @@ export default class PresenceStore {
       this.timeouts.delete(id);
     }
 
-    this.update(documentId, userId, isEditing);
+    this.update(documentId, userId, isEditing, userName, userColor);
 
     timeout = setTimeout(() => {
       this.leave(documentId, userId);
@@ -100,16 +108,20 @@ export default class PresenceStore {
    * @param documentId ID of the document to update
    * @param userId ID of the user to update
    * @param isEditing Whether the user is "editing" the document
+   * @param userName Optional user name (for anonymous users)
+   * @param userColor Optional user color (for anonymous users)
    */
   @action
-  private update(documentId: string, userId: string, isEditing: boolean) {
+  private update(documentId: string, userId: string, isEditing: boolean, userName?: string, userColor?: string) {
     const presence = this.data.get(documentId) || new Map();
     const existing = presence.get(userId);
 
-    if (!existing || existing.isEditing !== isEditing) {
+    if (!existing || existing.isEditing !== isEditing || existing.userName !== userName || existing.userColor !== userColor) {
       presence.set(userId, {
         isEditing,
         userId,
+        userName,
+        userColor,
       });
       this.data.set(documentId, presence);
     }

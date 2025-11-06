@@ -79,9 +79,9 @@ function DocumentMenu({
       }),
       document.collectionId
         ? subscriptions.fetchOne({
-            collectionId: document.collectionId,
-            event: SubscriptionType.Document,
-          })
+          collectionId: document.collectionId,
+          event: SubscriptionType.Document,
+        })
         : noop,
       pins.fetchOne({
         documentId: document.id,

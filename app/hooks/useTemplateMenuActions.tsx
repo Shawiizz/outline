@@ -47,9 +47,9 @@ export function useTemplateMenuActions({
       createActionV2({
         name: user
           ? TextHelper.replaceTemplateVariables(
-              template.titleWithDefault,
-              user
-            )
+            template.titleWithDefault,
+            user
+          )
           : template.titleWithDefault,
         section: DocumentsSection,
         icon: template.icon ? (

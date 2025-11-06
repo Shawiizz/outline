@@ -153,8 +153,8 @@ export type ActionV2 = BaseActionV2 & {
   variant: "action";
   dangerous?: boolean;
   tooltip?:
-    | ((context: ActionContext) => React.ReactChild | undefined)
-    | React.ReactChild;
+  | ((context: ActionContext) => React.ReactChild | undefined)
+  | React.ReactChild;
   perform: (context: ActionContext) => any;
 };
 
@@ -172,10 +172,10 @@ export type ExternalLinkActionV2 = BaseActionV2 & {
 export type ActionV2WithChildren = BaseActionV2 & {
   variant: "action_with_children";
   children:
-    | ((
-        context: ActionContext
-      ) => (ActionV2Variant | ActionV2Group | ActionV2Separator)[])
-    | (ActionV2Variant | ActionV2Group | ActionV2Separator)[];
+  | ((
+    context: ActionContext
+  ) => (ActionV2Variant | ActionV2Group | ActionV2Separator)[])
+  | (ActionV2Variant | ActionV2Group | ActionV2Separator)[];
 };
 
 export type ActionV2Variant =
@@ -302,7 +302,11 @@ type Cursor = {
 export type AwarenessChangeEvent = {
   states: {
     clientId: number;
-    user?: { id: string };
+    user?: {
+      id: string;
+      name?: string;
+      color?: string;
+    };
     cursor: Cursor;
     scrollY: number | undefined;
   }[];
@@ -313,18 +317,18 @@ export const EmptySelectValue = "__empty__";
 export type Permission = {
   label: string;
   value:
-    | CollectionPermission
-    | DocumentPermission
-    | GroupPermission
-    | typeof EmptySelectValue;
+  | CollectionPermission
+  | DocumentPermission
+  | GroupPermission
+  | typeof EmptySelectValue;
   divider?: boolean;
 };
 
 // TODO: Can we make this type driven by the @Field decorator
 export type Properties<C> = {
   [Property in keyof C as C[Property] extends JSONValue
-    ? Property
-    : never]?: C[Property];
+  ? Property
+  : never]?: C[Property];
 };
 
 export enum CommentSortType {

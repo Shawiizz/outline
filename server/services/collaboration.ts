@@ -3,7 +3,7 @@ import { Duplex } from "stream";
 import url from "url";
 import { Redis } from "@hocuspocus/extension-redis";
 import { Throttle } from "@hocuspocus/extension-throttle";
-import { Server } from "@hocuspocus/server";
+import { Server, Hocuspocus } from "@hocuspocus/server";
 import Koa from "koa";
 import WebSocket from "ws";
 import { DocumentValidation } from "@shared/validations";
@@ -18,6 +18,11 @@ import { EditorVersionExtension } from "../collaboration/EditorVersionExtension"
 import LoggerExtension from "../collaboration/LoggerExtension";
 import MetricsExtension from "../collaboration/MetricsExtension";
 import PersistenceExtension from "../collaboration/PersistenceExtension";
+import PublicEditGuardExtension from "../collaboration/PublicEditGuardExtension";
+
+// Export hocuspocus server instance for external access
+export let collaborationServer: Hocuspocus | null = null;
+export let publicEditGuardExtension: PublicEditGuardExtension | null = null;
 
 export default function init(
   app: Koa,
@@ -30,6 +35,9 @@ export default function init(
     maxPayload: DocumentValidation.maxStateLength,
   });
 
+  // Create extension instance for external access
+  const guardExtension = new PublicEditGuardExtension();
+
   const hocuspocus = Server.configure({
     debounce: 3000,
     timeout: 30000,
@@ -37,10 +45,10 @@ export default function init(
     extensions: [
       ...(env.REDIS_COLLABORATION_URL
         ? [
-            new Redis({
-              redis: RedisAdapter.collaborationClient,
-            }),
-          ]
+          new Redis({
+            redis: RedisAdapter.collaborationClient,
+          }),
+        ]
         : []),
       new Throttle({
         throttle: env.RATE_LIMITER_COLLABORATION_REQUESTS,
@@ -52,11 +60,16 @@ export default function init(
       new EditorVersionExtension(),
       new AuthenticationExtension(),
       new PersistenceExtension(),
+      guardExtension,
       new ViewsExtension(),
       new LoggerExtension(),
       new MetricsExtension(),
     ],
   });
+
+  // Store the instances for external access
+  collaborationServer = hocuspocus;
+  publicEditGuardExtension = guardExtension;
 
   server.on(
     "upgrade",

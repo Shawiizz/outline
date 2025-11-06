@@ -18,6 +18,7 @@ export default function presentShare(share: Share, isAdmin = false) {
     allowIndexing: share.allowIndexing,
     showLastUpdated: share.showLastUpdated,
     showTOC: share.showTOC,
+    allowPublicEdit: share.allowPublicEdit,
     lastAccessedAt: share.lastAccessedAt || undefined,
     views: share.views || 0,
     domain: share.domain,
