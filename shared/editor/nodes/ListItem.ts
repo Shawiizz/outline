@@ -212,8 +212,8 @@ export default class ListItem extends Node {
       Enter: splitListItem(type),
       Tab: sinkListItem(type),
       "Shift-Tab": liftListItem(type),
-      "Ctrl-ArrowRight": setListIndent("increase"),
-      "Ctrl-ArrowLeft": setListIndent("decrease"),
+      "Ctrl-Alt-ArrowRight": setListIndent("increase"),
+      "Ctrl-Alt-ArrowLeft": setListIndent("decrease"),
       "Shift-Enter": (state, dispatch) => {
         if (!isInList(state)) {
           return false;

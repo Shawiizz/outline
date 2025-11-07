@@ -331,7 +331,7 @@ function KeyboardShortcuts() {
           {
             shortcut: (
               <>
-                <Key>Ctrl</Key> + <Key symbol>→</Key>
+                <Key>Ctrl</Key> + <Key symbol>{altDisplay}</Key> + <Key symbol>→</Key>
               </>
             ),
             label: t("Indent entire list"),
@@ -339,7 +339,7 @@ function KeyboardShortcuts() {
           {
             shortcut: (
               <>
-                <Key>Ctrl</Key> + <Key symbol>←</Key>
+                <Key>Ctrl</Key> + <Key symbol>{altDisplay}</Key> + <Key symbol>←</Key>
               </>
             ),
             label: t("Outdent entire list"),
@@ -366,32 +366,20 @@ function KeyboardShortcuts() {
         title: t("Indentation"),
         items: [
           {
-            shortcut: <Key>{t("Tab")}</Key>,
+            shortcut: (
+              <>
+                <Key>Ctrl</Key> + <Key symbol>{altDisplay}</Key> + <Key symbol>→</Key>
+              </>
+            ),
             label: t("Indent paragraph or heading"),
           },
           {
             shortcut: (
               <>
-                <Key symbol>⇧</Key> + <Key>{t("Tab")}</Key>
+                <Key>Ctrl</Key> + <Key symbol>{altDisplay}</Key> + <Key symbol>←</Key>
               </>
             ),
             label: t("Outdent paragraph or heading"),
-          },
-          {
-            shortcut: (
-              <>
-                <Key>Ctrl</Key> + <Key symbol>→</Key>
-              </>
-            ),
-            label: t("Indent paragraph or heading (alternative)"),
-          },
-          {
-            shortcut: (
-              <>
-                <Key>Ctrl</Key> + <Key symbol>←</Key>
-              </>
-            ),
-            label: t("Outdent paragraph or heading (alternative)"),
           },
         ],
       },

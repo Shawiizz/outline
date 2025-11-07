@@ -76,10 +76,8 @@ export default class Paragraph extends Node {
     return {
       "Shift-Ctrl-0": setBlockType(type),
       Backspace: deleteEmptyFirstParagraph,
-      Tab: setParagraphIndent("increase"),
-      "Shift-Tab": setParagraphIndent("decrease"),
-      "Ctrl-ArrowRight": setParagraphIndent("increase"),
-      "Ctrl-ArrowLeft": setParagraphIndent("decrease"),
+      "Ctrl-Alt-ArrowRight": setParagraphIndent("increase"),
+      "Ctrl-Alt-ArrowLeft": setParagraphIndent("decrease"),
     };
   }
 
