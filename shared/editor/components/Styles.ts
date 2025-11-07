@@ -408,12 +408,13 @@ width: 100%;
         display: none;
         position: absolute;
         left: -24px;
-        top: 0;
+        top: 50%;
+        transform: translateY(-50%);
         font-family: ${props.theme.fontFamilyMono};
         color: ${props.theme.textSecondary};
         font-size: 13px;
         font-weight: 500;
-        line-height: inherit;
+        line-height: 1;
         transition: opacity 150ms ease-in-out;
         opacity: 0;
         width: 24px;
@@ -926,12 +927,13 @@ h6:not(.placeholder)::before {
   user-select: none;
   background: ${props.theme.background};
   flex-direction: row;
+  align-items: center;
   display: none;
   position: absolute;
   left: -26px;
   top: 0;
   width: 26px;
-  height: 24px;
+  height: 100%;
 
   &:dir(rtl) {
     left: auto;
