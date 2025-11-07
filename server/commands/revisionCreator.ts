@@ -3,7 +3,6 @@ import { Document, User, Revision } from "@server/models";
 import { sequelize } from "@server/storage/database";
 import Redis from "@server/storage/redis";
 import { DocumentEvent, RevisionEvent } from "@server/types";
-import { isAnonymousUserId } from "@shared/utils/anonymousNames";
 
 export default async function revisionCreator({
   event,
@@ -20,12 +19,7 @@ export default async function revisionCreator({
     const collaboratorIds = await Redis.defaultClient.smembers(key);
     await Redis.defaultClient.del(key);
 
-    // Filter out anonymous users as they cannot be stored in the revisions table
-    const validCollaboratorIds = collaboratorIds.filter(
-      (id) => !isAnonymousUserId(id)
-    );
-
-    return await Revision.createFromDocument(
+    const revision = await Revision.createFromDocument(
       createContext({
         user,
         authType: event.authType,
@@ -33,7 +27,9 @@ export default async function revisionCreator({
         transaction,
       }),
       document,
-      validCollaboratorIds
+      collaboratorIds
     );
+
+    return revision;
   });
 }

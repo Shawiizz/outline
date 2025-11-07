@@ -2,8 +2,10 @@ import { onAuthenticatePayload, Extension } from "@hocuspocus/server";
 import { trace } from "@server/logging/tracing";
 import Document from "@server/models/Document";
 import Share from "@server/models/Share";
+import Team from "@server/models/Team";
 import { can } from "@server/policies";
 import { getUserForJWT } from "@server/utils/jwt";
+import { getOrCreateAnonymousUser } from "@server/utils/anonymous";
 import { generateAnonymousName } from "@shared/utils/anonymousNames";
 import { AuthenticationError } from "../errors";
 
@@ -48,16 +50,24 @@ export default class AuthenticationExtension implements Extension {
       // Allow connection but set read-only based on allowPublicEdit
       connection.readOnly = !share.allowPublicEdit;
 
-      // Generate a unique name and color for this anonymous session
+      // Get team for anonymous user creation
+      const team = await Team.findByPk(document.teamId);
+      if (!team) {
+        throw AuthenticationError("Team not found");
+      }
+
+      // Get or create the default anonymous user in the database
+      const anonymousUser = await getOrCreateAnonymousUser(token, team);
+
+      // Generate a unique display name and color for this session
       const { name, color } = generateAnonymousName(token);
 
-      // Return a pseudo-user for anonymous editing/viewing
+      // Return the real database user but with session-specific display info
       return {
         user: {
-          id: `anonymous-${token}`,
-          name,
-          color,
-          isAnonymous: true,
+          ...anonymousUser.toJSON(),
+          name, // Override display name for this session
+          color, // Override color for this session
         },
       };
     }

@@ -152,6 +152,13 @@ class User extends ParanoidModel<
   @Column(DataType.ENUM(...Object.values(UserRole)))
   role: UserRole;
 
+  /**
+   * Whether this is a temporary anonymous user (not a real account)
+   */
+  @Default(false)
+  @Column(DataType.BOOLEAN)
+  isAnonymous: boolean;
+
   @Column(DataType.BLOB)
   @Encrypted
   jwtSecret: string;

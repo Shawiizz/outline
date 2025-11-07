@@ -63,6 +63,9 @@ class User extends ParanoidModel implements Searchable {
   @observable
   isSuspended: boolean;
 
+  @observable
+  isAnonymous: boolean;
+
   @computed
   get searchContent(): string[] {
     return [this.name, this.email].filter(Boolean);

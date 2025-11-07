@@ -2,6 +2,7 @@ import { Next } from "koa";
 import { Share, Document, User, Team } from "@server/models";
 import { AppContext } from "@server/types";
 import { AuthenticationError } from "@server/errors";
+import { getOrCreateAnonymousUser } from "@server/utils/anonymous";
 import auth from "./authentication";
 
 /**
@@ -60,17 +61,8 @@ export default function authOrPublicEdit() {
                 throw AuthenticationError("Team not found");
             }
 
-            // Create a minimal anonymous user representation
-            // This user won't be saved to DB, it's just for the request context
-            const anonymousUser = {
-                id: `anonymous-${shareId}`,
-                name: "Anonymous Editor",
-                email: `anonymous-${shareId}@public.edit`,
-                teamId: team.id,
-                team,
-                isAnonymous: true,
-                shareId,
-            } as unknown as User;
+            // Get or create anonymous user in database
+            const anonymousUser = await getOrCreateAnonymousUser(shareId, team);
 
             ctx.state.auth = {
                 user: anonymousUser,

@@ -65,7 +65,7 @@ const DocumentMeta: React.FC<Props> = ({
     ? collections.get(document.collectionId)
     : undefined;
   const lastUpdatedByCurrentUser = user.id === updatedBy.id;
-  const userName = updatedBy.name;
+  const userName = updatedBy.isAnonymous ? t("Anonymous User") : updatedBy.name;
   let content;
 
   if (revision) {
