@@ -3,10 +3,12 @@ import { trace } from "@server/logging/tracing";
 import Document from "@server/models/Document";
 import Share from "@server/models/Share";
 import Team from "@server/models/Team";
+import Collection from "@server/models/Collection";
 import { can } from "@server/policies";
 import { getUserForJWT } from "@server/utils/jwt";
 import { getOrCreateAnonymousUser } from "@server/utils/anonymous";
 import { generateAnonymousName } from "@shared/utils/anonymousNames";
+import { NavigationNode } from "@shared/types";
 import { AuthenticationError } from "../errors";
 
 @trace()
@@ -27,8 +29,8 @@ export default class AuthenticationExtension implements Extension {
     const isShareId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token);
 
     if (isShareId) {
-      // Handle public editing via share link
-      const share = await Share.findOne({
+      // Try to find a direct share for this document
+      let share = await Share.findOne({
         where: {
           id: token,
           documentId,
@@ -36,6 +38,46 @@ export default class AuthenticationExtension implements Extension {
           revokedAt: null,
         },
       });
+
+      // If no direct share found, check if this document is a child of a shared parent
+      if (!share) {
+        share = await Share.findOne({
+          where: {
+            id: token,
+            published: true,
+            revokedAt: null,
+            includeChildDocuments: true,
+          },
+          include: [
+            {
+              model: Document.scope("withDrafts"),
+              as: "document",
+              include: [
+                {
+                  model: Collection.scope("withDocumentStructure"),
+                  as: "collection",
+                  required: false,
+                },
+              ],
+            },
+          ],
+        });
+
+        // Verify the requested document is actually a child of the shared document
+        if (share && share.document) {
+          const collection = share.document.collection;
+          if (collection) {
+            const sharedTree = collection.getDocumentTree(share.document.id);
+            const allIdsInSharedTree = this.getAllIdsInSharedTree(sharedTree);
+            
+            if (!allIdsInSharedTree.includes(documentId)) {
+              throw AuthenticationError("Invalid share");
+            }
+          } else {
+            throw AuthenticationError("Invalid share");
+          }
+        }
+      }
 
       if (!share) {
         throw AuthenticationError("Invalid share");
@@ -96,5 +138,20 @@ export default class AuthenticationExtension implements Extension {
     return {
       user,
     };
+  }
+
+  /**
+   * Recursively gets all document IDs in a shared tree
+   */
+  private getAllIdsInSharedTree(sharedTree: NavigationNode | null): string[] {
+    if (!sharedTree) {
+      return [];
+    }
+
+    const ids = [sharedTree.id];
+    for (const child of sharedTree.children) {
+      ids.push(...this.getAllIdsInSharedTree(child));
+    }
+    return ids;
   }
 }
