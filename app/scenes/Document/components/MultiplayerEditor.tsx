@@ -71,6 +71,26 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
   const isVisible = usePageVisibility();
   const isMounted = useIsMounted();
 
+  // Generate a unique session ID for anonymous users, stored in localStorage
+  // This ensures each browser/user gets a unique identity even on the same share link
+  const anonymousSessionId = useMemo(() => {
+    const shareId = (props as any).shareId;
+    if (!shareId) {
+      return null;
+    }
+
+    const storageKey = `anonymous-session-${shareId}`;
+    let sessionId = localStorage.getItem(storageKey);
+
+    if (!sessionId) {
+      // Generate a unique session ID using crypto
+      sessionId = crypto.randomUUID();
+      localStorage.setItem(storageKey, sessionId);
+    }
+
+    return sessionId;
+  }, [(props as any).shareId]);
+
   // Define user before useLayoutEffect so it can be used in provider setup
   const user = useMemo(() => {
     if (currentUser) {
@@ -81,13 +101,13 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
       };
     }
 
-    // For anonymous users, generate a name and color based on shareId
-    // This will be consistent for the same share link
+    // For anonymous users, generate a name and color based on the unique session ID
+    // This ensures each browser/user gets a different name
     const shareId = (props as any).shareId;
-    if (shareId) {
-      const { name, color } = generateAnonymousName(shareId);
+    if (shareId && anonymousSessionId) {
+      const { name, color } = generateAnonymousName(anonymousSessionId);
       return {
-        id: `anonymous-${shareId}`,
+        id: `anonymous-${anonymousSessionId}`,
         name,
         color,
       };
@@ -99,7 +119,7 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
       name: "Anonymous Editor",
       color: "#9E9E9E",
     };
-  }, [currentUser, (props as any).shareId]);
+  }, [currentUser, (props as any).shareId, anonymousSessionId]);
 
   // Provider initialization must be within useLayoutEffect rather than useState
   // or useMemo as both of these are ran twice in React StrictMode resulting in

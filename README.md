@@ -81,6 +81,24 @@ yarn test path/to/file.test.ts --watch
 yarn test:app
 ```
 
+## Docker Build
+
+To build the Docker images locally:
+
+```shell
+# Build base image
+docker build --no-cache -f Dockerfile.base -t outline-base .
+
+# Build outline image
+docker build --no-cache -t outline .
+```
+
+```
+docker build --no-cache -f Dockerfile.base -t shawiizz/outline-base:latest .
+docker build --no-cache -t shawiizz/outline:latest .
+
+```
+
 ## Migrations
 
 Sequelize is used to create and run migrations, for example:

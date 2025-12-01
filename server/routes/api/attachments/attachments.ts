@@ -8,13 +8,14 @@ import { createContext } from "@server/context";
 import {
   AuthorizationError,
   InvalidRequestError,
+  NotFoundError,
   ValidationError,
 } from "@server/errors";
 import auth from "@server/middlewares/authentication";
 import { rateLimiter } from "@server/middlewares/rateLimiter";
 import { transaction } from "@server/middlewares/transaction";
 import validate from "@server/middlewares/validate";
-import { Attachment, Document } from "@server/models";
+import { Attachment, Document, Share } from "@server/models";
 import AttachmentHelper from "@server/models/helpers/AttachmentHelper";
 import { authorize } from "@server/policies";
 import { presentAttachment, presentPolicies } from "@server/presenters";
@@ -272,11 +273,159 @@ const handleAttachmentsRedirect = async (
   ctx: APIContext<T.AttachmentsRedirectReq>
 ) => {
   const id = (ctx.input.body.id ?? ctx.input.query.id) as string;
+  const shareId = ctx.input.body.shareId ?? ctx.input.query.shareId;
 
-  const { user } = ctx.state.auth;
   const attachment = await Attachment.findByPk(id, {
     rejectOnEmpty: true,
   });
+
+  // Check if this is a public access (no authenticated user)
+  if (!ctx.state.auth?.user) {
+    // The attachment must belong to a document
+    if (!attachment.documentId) {
+      throw AuthorizationError("Attachment is not associated with a document");
+    }
+
+    // Check if the attachment's document has any active public share
+    const document = await Document.findByPk(attachment.documentId);
+    if (!document) {
+      throw NotFoundError("Document not found");
+    }
+
+    // If shareId is provided, verify it's valid for this document
+    if (shareId) {
+      const share = await Share.findOne({
+        where: {
+          id: shareId,
+          published: true,
+          revokedAt: null,
+        },
+      });
+
+      if (!share) {
+        throw NotFoundError("Share not found");
+      }
+
+      let isAccessible = false;
+
+      if (share.documentId === document.id) {
+        isAccessible = true;
+      } else if (share.includeChildDocuments && share.documentId) {
+        const sharedDocument = await Document.findByPk(share.documentId, {
+          include: [
+            {
+              association: "collection",
+              required: false,
+            },
+          ],
+        });
+
+        if (sharedDocument?.collection) {
+          const sharedTree = sharedDocument.collection.getDocumentTree(share.documentId);
+          if (sharedTree) {
+            const getAllIds = (node: any): string[] => {
+              const ids = [node.id];
+              for (const child of node.children || []) {
+                ids.push(...getAllIds(child));
+              }
+              return ids;
+            };
+            const allIds = getAllIds(sharedTree);
+            isAccessible = allIds.includes(document.id);
+          }
+        }
+      }
+
+      if (!isAccessible) {
+        throw AuthorizationError("Attachment not accessible via this share");
+      }
+    } else {
+      // No shareId provided - check if there's any active share for this document
+      // This allows images to load without explicitly passing shareId
+      const share = await Share.findOne({
+        where: {
+          documentId: document.id,
+          published: true,
+          revokedAt: null,
+        },
+      });
+
+      if (!share) {
+        // Check if this document is a child of any shared document
+        const parentShares = await Share.findAll({
+          where: {
+            published: true,
+            revokedAt: null,
+            includeChildDocuments: true,
+          },
+          include: [
+            {
+              model: Document,
+              as: "document",
+              required: true,
+              include: [
+                {
+                  association: "collection",
+                  required: false,
+                },
+              ],
+            },
+          ],
+        });
+
+        let isChildOfSharedDocument = false;
+        for (const parentShare of parentShares) {
+          if (parentShare.document?.collection) {
+            const sharedTree = parentShare.document.collection.getDocumentTree(parentShare.documentId!);
+            if (sharedTree) {
+              const getAllIds = (node: any): string[] => {
+                const ids = [node.id];
+                for (const child of node.children || []) {
+                  ids.push(...getAllIds(child));
+                }
+                return ids;
+              };
+              const allIds = getAllIds(sharedTree);
+              if (allIds.includes(document.id)) {
+                isChildOfSharedDocument = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (!isChildOfSharedDocument) {
+          throw AuthorizationError("Attachment not accessible");
+        }
+      }
+    }
+
+    // Update last accessed timestamp
+    await attachment.update(
+      {
+        lastAccessedAt: new Date(),
+      },
+      {
+        silent: true,
+      }
+    );
+
+    // For public shares, use appropriate URLs
+    if (attachment.isPrivate) {
+      ctx.set(
+        "Cache-Control",
+        `max-age=${BaseStorage.defaultSignedUrlExpires}, immutable`
+      );
+      ctx.redirect(await attachment.signedUrl);
+    } else {
+      ctx.set("Cache-Control", `max-age=604800, immutable`);
+      ctx.redirect(attachment.canonicalUrl);
+    }
+    return;
+  }
+
+  // Normal authenticated access
+  const { user } = ctx.state.auth;
 
   if (attachment.isPrivate && attachment.teamId !== user.teamId) {
     throw AuthorizationError();
@@ -305,13 +454,13 @@ const handleAttachmentsRedirect = async (
 
 router.get(
   "attachments.redirect",
-  auth(),
+  auth({ optional: true }),
   validate(T.AttachmentsRedirectSchema),
   handleAttachmentsRedirect
 );
 router.post(
   "attachments.redirect",
-  auth(),
+  auth({ optional: true }),
   validate(T.AttachmentsRedirectSchema),
   handleAttachmentsRedirect
 );

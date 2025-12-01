@@ -7,61 +7,61 @@ import { depths, s } from "@shared/styles";
 import { fadeAndScaleIn, fadeIn } from "~/styles/animations";
 
 type Props = {
-  isOpen: boolean;
-  value: string;
-  onSelect: (color: string) => void;
-  onClose: () => void;
+    isOpen: boolean;
+    value: string;
+    onSelect: (color: string) => void;
+    onClose: () => void;
 };
 
 export default function ColorPickerDialog({ isOpen, value, onSelect, onClose }: Props) {
-  const { t } = useTranslation();
-  const [color, setColor] = React.useState(value || "#000000");
+    const { t } = useTranslation();
+    const [color, setColor] = React.useState(value || "#000000");
 
-  // Reset color when dialog opens with new value
-  React.useEffect(() => {
-    if (isOpen) {
-      setColor(value || "#000000");
-    }
-  }, [isOpen, value]);
+    // Reset color when dialog opens with new value
+    React.useEffect(() => {
+        if (isOpen) {
+            setColor(value || "#000000");
+        }
+    }, [isOpen, value]);
 
-  const handleChange = (colorResult: ColorResult) => {
-    setColor(colorResult.hex);
-  };
+    const handleChange = (colorResult: ColorResult) => {
+        setColor(colorResult.hex);
+    };
 
-  const handleApply = () => {
-    onSelect(color);
-    onClose();
-  };
+    const handleApply = () => {
+        onSelect(color);
+        onClose();
+    };
 
-  const handleCancel = () => {
-    onClose();
-  };
+    const handleCancel = () => {
+        onClose();
+    };
 
-  return (
-    <Dialog.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <Dialog.Portal>
-        <StyledOverlay />
-        <StyledContent>
-          <Title>{t("Choose a color")}</Title>
-          <PickerWrapper>
-            <ChromePicker
-              color={color}
-              onChange={handleChange}
-              disableAlpha
-            />
-          </PickerWrapper>
-          <ButtonRow>
-            <CancelButton onClick={handleCancel}>
-              {t("Cancel")}
-            </CancelButton>
-            <ApplyButton onClick={handleApply}>
-              {t("Apply")}
-            </ApplyButton>
-          </ButtonRow>
-        </StyledContent>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
+    return (
+        <Dialog.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
+            <Dialog.Portal>
+                <StyledOverlay />
+                <StyledContent>
+                    <Title>{t("Choose a color")}</Title>
+                    <PickerWrapper>
+                        <ChromePicker
+                            color={color}
+                            onChange={handleChange}
+                            disableAlpha
+                        />
+                    </PickerWrapper>
+                    <ButtonRow>
+                        <CancelButton onClick={handleCancel}>
+                            {t("Cancel")}
+                        </CancelButton>
+                        <ApplyButton onClick={handleApply}>
+                            {t("Apply")}
+                        </ApplyButton>
+                    </ButtonRow>
+                </StyledContent>
+            </Dialog.Portal>
+        </Dialog.Root>
+    );
 }
 
 const StyledOverlay = styled(Dialog.Overlay)`

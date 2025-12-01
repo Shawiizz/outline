@@ -11,184 +11,184 @@ import ColorPickerDialog from "./ColorPickerDialog";
 import { useTranslation } from "react-i18next";
 
 type Props = {
-  item: MenuItem;
-  currentColor: string | null;
+    item: MenuItem;
+    currentColor: string | null;
 };
 
 // Extended color palette
 const PRESET_COLORS = [
-  // Reds
-  "#E53935", "#EF5350", "#F44336",
-  // Pinks
-  "#D81B60", "#EC407A", "#F06292",
-  // Purples
-  "#8E24AA", "#AB47BC", "#BA68C8",
-  // Blues
-  "#1E88E5", "#42A5F5", "#64B5F6",
-  // Cyans
-  "#00ACC1", "#26C6DA", "#4DD0E1",
-  // Greens
-  "#43A047", "#66BB6A", "#81C784",
-  // Yellows
-  "#FDD835", "#FFEE58", "#FFF176",
-  // Oranges
-  "#FB8C00", "#FFA726", "#FFB74D",
-  // Browns
-  "#6D4C41", "#8D6E63", "#A1887F",
-  // Grays
-  "#546E7A", "#78909C", "#90A4AE",
-  // Black & White
-  "#212121", "#424242", "#757575",
+    // Reds
+    "#E53935", "#EF5350", "#F44336",
+    // Pinks
+    "#D81B60", "#EC407A", "#F06292",
+    // Purples
+    "#8E24AA", "#AB47BC", "#BA68C8",
+    // Blues
+    "#1E88E5", "#42A5F5", "#64B5F6",
+    // Cyans
+    "#00ACC1", "#26C6DA", "#4DD0E1",
+    // Greens
+    "#43A047", "#66BB6A", "#81C784",
+    // Yellows
+    "#FDD835", "#FFEE58", "#FFF176",
+    // Oranges
+    "#FB8C00", "#FFA726", "#FFB74D",
+    // Browns
+    "#6D4C41", "#8D6E63", "#A1887F",
+    // Grays
+    "#546E7A", "#78909C", "#90A4AE",
+    // Black & White
+    "#212121", "#424242", "#757575",
 ];
 
 export default function TextColorToolbarDropdown({ item, currentColor }: Props) {
-  const editor = useEditor();
-  const { t } = useTranslation();
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  // Store selection range for applying color
-  const savedSelectionRef = useRef<{ from: number; to: number } | null>(null);
+    const editor = useEditor();
+    const { t } = useTranslation();
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [isDialogOpen, setIsDialogOpen] = useState(false);
+    // Store selection range for applying color
+    const savedSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
-  // Apply color using saved selection
-  const applyColor = useCallback((color: string) => {
-    const { view } = editor;
-    const savedSelection = savedSelectionRef.current;
-    
-    if (view && savedSelection) {
-      const { from, to } = savedSelection;
-      const { schema, tr } = view.state;
-      const markType = schema.marks.text_color;
-      
-      if (markType) {
-        tr.addMark(from, to, markType.create({ color }));
-        view.dispatch(tr);
-        view.focus();
-      }
-    }
-  }, [editor]);
+    // Apply color using saved selection
+    const applyColor = useCallback((color: string) => {
+        const { view } = editor;
+        const savedSelection = savedSelectionRef.current;
 
-  const handleColorSelect = useCallback((color: string) => {
-    applyColor(color);
-    setIsDropdownOpen(false);
-    savedSelectionRef.current = null;
-  }, [applyColor]);
+        if (view && savedSelection) {
+            const { from, to } = savedSelection;
+            const { schema, tr } = view.state;
+            const markType = schema.marks.text_color;
 
-  const handleCirclePickerChange = useCallback((colorResult: ColorResult) => {
-    handleColorSelect(colorResult.hex);
-  }, [handleColorSelect]);
+            if (markType) {
+                tr.addMark(from, to, markType.create({ color }));
+                view.dispatch(tr);
+                view.focus();
+            }
+        }
+    }, [editor]);
 
-  const handleRemoveColor = useCallback(() => {
-    const { view } = editor;
-    const savedSelection = savedSelectionRef.current;
-    
-    if (view && savedSelection && currentColor) {
-      const { from, to } = savedSelection;
-      const { schema, tr } = view.state;
-      const markType = schema.marks.text_color;
-      
-      if (markType) {
-        tr.removeMark(from, to, markType);
-        view.dispatch(tr);
-        view.focus();
-      }
-    }
-    setIsDropdownOpen(false);
-    savedSelectionRef.current = null;
-  }, [editor, currentColor]);
+    const handleColorSelect = useCallback((color: string) => {
+        applyColor(color);
+        setIsDropdownOpen(false);
+        savedSelectionRef.current = null;
+    }, [applyColor]);
 
-  const handleCloseAutoFocus = useCallback((ev: Event) => {
-    ev.stopImmediatePropagation();
-  }, []);
+    const handleCirclePickerChange = useCallback((colorResult: ColorResult) => {
+        handleColorSelect(colorResult.hex);
+    }, [handleColorSelect]);
 
-  // Save selection when dropdown opens
-  const handleOpenChange = useCallback((open: boolean) => {
-    if (open) {
-      const { view } = editor;
-      if (view) {
-        const { from, to } = view.state.selection;
-        savedSelectionRef.current = { from, to };
-      }
-    }
-    setIsDropdownOpen(open);
-  }, [editor]);
+    const handleRemoveColor = useCallback(() => {
+        const { view } = editor;
+        const savedSelection = savedSelectionRef.current;
 
-  const handleOpenCustomPicker = useCallback(() => {
-    // Selection is already saved from dropdown open
-    setIsDropdownOpen(false);
-    // Small delay to let the dropdown close first
-    setTimeout(() => {
-      setIsDialogOpen(true);
-    }, 50);
-  }, []);
+        if (view && savedSelection && currentColor) {
+            const { from, to } = savedSelection;
+            const { schema, tr } = view.state;
+            const markType = schema.marks.text_color;
 
-  const handleDialogClose = useCallback(() => {
-    setIsDialogOpen(false);
-    savedSelectionRef.current = null;
-    // Restore focus to editor
-    editor.view?.focus();
-  }, [editor]);
+            if (markType) {
+                tr.removeMark(from, to, markType);
+                view.dispatch(tr);
+                view.focus();
+            }
+        }
+        setIsDropdownOpen(false);
+        savedSelectionRef.current = null;
+    }, [editor, currentColor]);
 
-  // Prevent click events from propagating to the editor
-  const handleClick = useCallback((ev: React.MouseEvent) => {
-    ev.stopPropagation();
-  }, []);
+    const handleCloseAutoFocus = useCallback((ev: Event) => {
+        ev.stopImmediatePropagation();
+    }, []);
 
-  return (
-    <span onClick={handleClick}>
-      <DropdownMenu.Root open={isDropdownOpen} onOpenChange={handleOpenChange}>
-        <DropdownMenu.Trigger asChild>
-          <ToolbarButton aria-label={item.tooltip}>
-            {item.icon}
-          </ToolbarButton>
-        </DropdownMenu.Trigger>
-        
-        <DropdownMenu.Portal>
-          <StyledContent
-            align="end"
-            sideOffset={8}
-            onCloseAutoFocus={handleCloseAutoFocus}
-          >
-            {currentColor && (
-              <>
-                <RemoveColorButton onClick={handleRemoveColor}>
-                  <RemoveIcon />
-                  <span>{t("Remove color")}</span>
-                </RemoveColorButton>
-                <Divider />
-              </>
-            )}
-            
-            <PresetSection>
-              <CirclePickerWrapper>
-                <CirclePicker
-                  color={currentColor || undefined}
-                  colors={PRESET_COLORS}
-                  circleSize={24}
-                  circleSpacing={8}
-                  width="252px"
-                  onChange={handleCirclePickerChange}
-                />
-              </CirclePickerWrapper>
-            </PresetSection>
-            
-            <Divider />
-            
-            <CustomColorButton onClick={handleOpenCustomPicker}>
-              <ColorWheelIcon />
-              <span>{t("Custom color")}...</span>
-            </CustomColorButton>
-          </StyledContent>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
+    // Save selection when dropdown opens
+    const handleOpenChange = useCallback((open: boolean) => {
+        if (open) {
+            const { view } = editor;
+            if (view) {
+                const { from, to } = view.state.selection;
+                savedSelectionRef.current = { from, to };
+            }
+        }
+        setIsDropdownOpen(open);
+    }, [editor]);
 
-      <ColorPickerDialog
-        isOpen={isDialogOpen}
-        value={currentColor || "#000000"}
-        onSelect={handleColorSelect}
-        onClose={handleDialogClose}
-      />
-    </span>
-  );
+    const handleOpenCustomPicker = useCallback(() => {
+        // Selection is already saved from dropdown open
+        setIsDropdownOpen(false);
+        // Small delay to let the dropdown close first
+        setTimeout(() => {
+            setIsDialogOpen(true);
+        }, 50);
+    }, []);
+
+    const handleDialogClose = useCallback(() => {
+        setIsDialogOpen(false);
+        savedSelectionRef.current = null;
+        // Restore focus to editor
+        editor.view?.focus();
+    }, [editor]);
+
+    // Prevent click events from propagating to the editor
+    const handleClick = useCallback((ev: React.MouseEvent) => {
+        ev.stopPropagation();
+    }, []);
+
+    return (
+        <span onClick={handleClick}>
+            <DropdownMenu.Root open={isDropdownOpen} onOpenChange={handleOpenChange}>
+                <DropdownMenu.Trigger asChild>
+                    <ToolbarButton aria-label={item.tooltip}>
+                        {item.icon}
+                    </ToolbarButton>
+                </DropdownMenu.Trigger>
+
+                <DropdownMenu.Portal>
+                    <StyledContent
+                        align="end"
+                        sideOffset={8}
+                        onCloseAutoFocus={handleCloseAutoFocus}
+                    >
+                        {currentColor && (
+                            <>
+                                <RemoveColorButton onClick={handleRemoveColor}>
+                                    <RemoveIcon />
+                                    <span>{t("Remove color")}</span>
+                                </RemoveColorButton>
+                                <Divider />
+                            </>
+                        )}
+
+                        <PresetSection>
+                            <CirclePickerWrapper>
+                                <CirclePicker
+                                    color={currentColor || undefined}
+                                    colors={PRESET_COLORS}
+                                    circleSize={24}
+                                    circleSpacing={8}
+                                    width="252px"
+                                    onChange={handleCirclePickerChange}
+                                />
+                            </CirclePickerWrapper>
+                        </PresetSection>
+
+                        <Divider />
+
+                        <CustomColorButton onClick={handleOpenCustomPicker}>
+                            <ColorWheelIcon />
+                            <span>{t("Custom color")}...</span>
+                        </CustomColorButton>
+                    </StyledContent>
+                </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+
+            <ColorPickerDialog
+                isOpen={isDialogOpen}
+                value={currentColor || "#000000"}
+                onSelect={handleColorSelect}
+                onClose={handleDialogClose}
+            />
+        </span>
+    );
 }
 
 const StyledContent = styled(DropdownMenu.Content)`

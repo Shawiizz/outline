@@ -67,12 +67,16 @@ export type AttachmentDeleteReq = z.infer<typeof AttachmentDeleteSchema>;
 
 export const AttachmentsRedirectSchema = BaseSchema.extend({
   body: z.object({
-    /** Id of the attachment to be deleted */
+    /** Id of the attachment to redirect */
     id: z.string().uuid().optional(),
+    /** Optional shareId for public access */
+    shareId: z.string().uuid().optional(),
   }),
   query: z.object({
-    /** Id of the attachment to be deleted */
+    /** Id of the attachment to redirect */
     id: z.string().uuid().optional(),
+    /** Optional shareId for public access */
+    shareId: z.string().uuid().optional(),
   }),
 }).refine((req) => !(isEmpty(req.body.id) && isEmpty(req.query.id)), {
   message: "id is required",
