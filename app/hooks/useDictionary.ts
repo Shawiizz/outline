@@ -101,6 +101,7 @@ export default function useDictionary() {
       warningNotice: t("Warning notice"),
       success: t("Success"),
       successNotice: t("Success notice"),
+      textColor: t("Text color"),
       insertDate: t("Current date"),
       insertTime: t("Current time"),
       insertDateTime: t("Current date and time"),

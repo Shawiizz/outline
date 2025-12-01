@@ -26,6 +26,7 @@ import {
 import { EditorState } from "prosemirror-state";
 import styled from "styled-components";
 import Highlight from "@shared/editor/marks/Highlight";
+import TextColor from "@shared/editor/marks/TextColor";
 import { getMarksBetween } from "@shared/editor/queries/getMarksBetween";
 import { isInCode } from "@shared/editor/queries/isInCode";
 import { isInList } from "@shared/editor/queries/isInList";
@@ -34,6 +35,7 @@ import { isNodeActive } from "@shared/editor/queries/isNodeActive";
 import { MenuItem } from "@shared/editor/types";
 import { metaDisplay } from "@shared/utils/keyboard";
 import CircleIcon from "~/components/Icons/CircleIcon";
+import TextColorIcon from "~/components/Icons/TextColorIcon";
 import { Dictionary } from "~/hooks/useDictionary";
 import {
   isMobile as isMobileDevice,
@@ -78,6 +80,12 @@ export default function formattingMenuItems(
     state.selection.to,
     state
   ).find(({ mark }) => mark.type.name === "highlight");
+
+  const textColor = getMarksBetween(
+    state.selection.from,
+    state.selection.to,
+    state
+  ).find(({ mark }) => mark.type.name === "text_color");
 
   return [
     {
@@ -142,6 +150,37 @@ export default function formattingMenuItems(
           label: Highlight.colorNames[index],
           icon: <CircleIcon retainColor color={color} />,
           active: isMarkActive(schema.marks.highlight, { color }),
+          attrs: { color },
+        })),
+      ],
+    },
+    {
+      tooltip: dictionary.textColor,
+      shortcut: `${metaDisplay}+⇧+C`,
+      icon: textColor ? (
+        <TextColorIcon color={textColor.mark.attrs.color || TextColor.colors[0]} />
+      ) : (
+        <TextColorIcon />
+      ),
+      active: () => !!textColor,
+      visible: !isCode && (!isMobile || !isEmpty),
+      children: [
+        ...(textColor
+          ? [
+            {
+              name: "text_color",
+              label: dictionary.none,
+              icon: <DottedTextColorIcon retainColor color="transparent" />,
+              active: () => false,
+              attrs: { color: textColor.mark.attrs.color },
+            },
+          ]
+          : []),
+        ...TextColor.colors.map((color, index) => ({
+          name: "text_color",
+          label: TextColor.colorNames[index],
+          icon: <TextColorIcon retainColor color={color} />,
+          active: isMarkActive(schema.marks.text_color, { color }),
           attrs: { color },
         })),
       ],
@@ -338,5 +377,13 @@ const DottedCircleIcon = styled(CircleIcon)`
   circle {
     stroke: ${(props) => props.theme.textSecondary};
     stroke-dasharray: 2, 2;
+  }
+`;
+
+const DottedTextColorIcon = styled(TextColorIcon)`
+  path, rect {
+    stroke: ${(props) => props.theme.textSecondary};
+    stroke-dasharray: 2, 2;
+    fill: transparent;
   }
 `;
