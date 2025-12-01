@@ -155,6 +155,7 @@ export default function formattingMenuItems(
       ],
     },
     {
+      name: "text_color_picker",
       tooltip: dictionary.textColor,
       shortcut: `${metaDisplay}+⇧+C`,
       icon: textColor ? (
@@ -164,26 +165,7 @@ export default function formattingMenuItems(
       ),
       active: () => !!textColor,
       visible: !isCode && (!isMobile || !isEmpty),
-      children: [
-        ...(textColor
-          ? [
-            {
-              name: "text_color",
-              label: dictionary.none,
-              icon: <DottedTextColorIcon retainColor color="transparent" />,
-              active: () => false,
-              attrs: { color: textColor.mark.attrs.color },
-            },
-          ]
-          : []),
-        ...TextColor.colors.map((color, index) => ({
-          name: "text_color",
-          label: TextColor.colorNames[index],
-          icon: <TextColorIcon retainColor color={color} />,
-          active: isMarkActive(schema.marks.text_color, { color }),
-          attrs: { color },
-        })),
-      ],
+      attrs: { currentColor: textColor?.mark.attrs.color || null },
     },
     {
       name: "code_inline",
@@ -377,13 +359,5 @@ const DottedCircleIcon = styled(CircleIcon)`
   circle {
     stroke: ${(props) => props.theme.textSecondary};
     stroke-dasharray: 2, 2;
-  }
-`;
-
-const DottedTextColorIcon = styled(TextColorIcon)`
-  path, rect {
-    stroke: ${(props) => props.theme.textSecondary};
-    stroke-dasharray: 2, 2;
-    fill: transparent;
   }
 `;

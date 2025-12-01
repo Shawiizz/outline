@@ -193,6 +193,9 @@ export function SelectionToolbar(props: Props) {
     if (item.name === "dimensions") {
       return item.visible ?? false;
     }
+    if (item.name === "text_color_picker") {
+      return item.visible ?? true;
+    }
     if (item.name && !commands[item.name]) {
       return false;
     }

@@ -17,6 +17,7 @@ import { MenuProvider } from "~/components/primitives/Menu/MenuContext";
 import { Menu, MenuTrigger } from "~/components/primitives/Menu";
 import { useTranslation } from "react-i18next";
 import EventBoundary from "@shared/components/EventBoundary";
+import TextColorToolbarDropdown from "./TextColorToolbarDropdown";
 
 type Props = {
   items: MenuItem[];
@@ -139,6 +140,15 @@ function ToolbarMenu(props: Props) {
               >
                 {item.name === "dimensions" ? (
                   <MediaDimension key={index} />
+                ) : item.name === "text_color_picker" ? (
+                  <TextColorToolbarDropdown
+                    item={item}
+                    currentColor={
+                      typeof item.attrs === "object" && item.attrs
+                        ? (item.attrs.currentColor as string | null)
+                        : null
+                    }
+                  />
                 ) : item.children ? (
                   <ToolbarDropdown
                     handlers={props.handlers}
