@@ -27,6 +27,7 @@ type PersistedData = Pick<
   UiStore,
   | "languagePromptDismissed"
   | "commentsExpanded"
+  | "aiChatExpanded"
   | "theme"
   | "sidebarWidth"
   | "sidebarRightWidth"
@@ -78,6 +79,9 @@ class UiStore {
   commentsExpanded = false;
 
   @observable
+  aiChatExpanded = false;
+
+  @observable
   sidebarIsResizing = false;
 
   @observable
@@ -103,6 +107,7 @@ class UiStore {
       data.sidebarRightWidth || defaultTheme.sidebarRightWidth;
     this.tocVisible = data.tocVisible;
     this.commentsExpanded = !!data.commentsExpanded;
+    this.aiChatExpanded = !!data.aiChatExpanded;
     this.theme = data.theme || Theme.System;
 
     // system theme listeners
@@ -226,6 +231,11 @@ class UiStore {
   };
 
   @action
+  toggleAiChat = () => {
+    this.set({ aiChatExpanded: !this.aiChatExpanded });
+  };
+
+  @action
   toggleCollapsedSidebar = () => {
     sidebarHidden = false;
     this.set({ sidebarCollapsed: !this.sidebarCollapsed });
@@ -292,6 +302,7 @@ class UiStore {
       sidebarRightWidth: this.sidebarRightWidth,
       languagePromptDismissed: this.languagePromptDismissed,
       commentsExpanded: this.commentsExpanded,
+      aiChatExpanded: this.aiChatExpanded,
       theme: this.theme,
     };
   }

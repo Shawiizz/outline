@@ -1,6 +1,7 @@
 import invariant from "invariant";
 import lowerFirst from "lodash/lowerFirst";
 import pluralize from "pluralize";
+import AiChatStore from "./AiChatStore";
 import ApiKeysStore from "./ApiKeysStore";
 import AuthStore from "./AuthStore";
 import AuthenticationProvidersStore from "./AuthenticationProvidersStore";
@@ -36,6 +37,7 @@ import WebhookSubscriptionsStore from "./WebhookSubscriptionStore";
 import Store from "./base/Store";
 
 export default class RootStore {
+  aiChat: AiChatStore;
   apiKeys: ApiKeysStore;
   auth: AuthStore;
   authenticationProviders: AuthenticationProvidersStore;
@@ -104,6 +106,7 @@ export default class RootStore {
     this.registerStore(DocumentPresenceStore, "presence");
     this.registerStore(DialogsStore, "dialogs");
     this.registerStore(UiStore, "ui");
+    this.registerStore(AiChatStore, "aiChat");
 
     // AuthStore must be initialized last as it makes use of the other stores.
     this.registerStore(AuthStore, "auth");

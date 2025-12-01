@@ -1,0 +1,1016 @@
+import MarkdownIt from "markdown-it";
+import { observer } from "mobx-react";
+import { CheckmarkIcon, CloseIcon, DocumentIcon, SparklesIcon, TrashIcon, RestoreIcon } from "outline-icons";
+import * as React from "react";
+import { useTranslation } from "react-i18next";
+import { useRouteMatch } from "react-router-dom";
+import styled, { useTheme } from "styled-components";
+import { s } from "@shared/styles";
+import { Avatar } from "~/components/Avatar";
+import ButtonSmall from "~/components/ButtonSmall";
+import Flex from "~/components/Flex";
+import { ArrowDownIcon } from "~/components/Icons/ArrowIcon";
+import NudeButton from "~/components/NudeButton";
+import Scrollable from "~/components/Scrollable";
+import Tooltip from "~/components/Tooltip";
+import useCurrentUser from "~/hooks/useCurrentUser";
+import useKeyDown from "~/hooks/useKeyDown";
+import useStores from "~/hooks/useStores";
+import { ProsemirrorHelper } from "~/models/helpers/ProsemirrorHelper";
+import type { DocumentEdit } from "~/stores/AiChatStore";
+import Sidebar from "./SidebarLayout";
+
+// Initialize markdown-it for rendering AI responses
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: true,
+});
+
+type ChatMode = "ask" | "agent";
+
+function AiChat() {
+  const { ui, aiChat, documents } = useStores();
+  const user = useCurrentUser();
+  const { t } = useTranslation();
+  const theme = useTheme();
+  const match = useRouteMatch<{ documentSlug: string }>();
+  const document = documents.get(match.params.documentSlug);
+
+  const [inputValue, setInputValue] = React.useState("");
+  const [showModelPicker, setShowModelPicker] = React.useState(false);
+  const [chatMode, setChatMode] = React.useState<ChatMode>(() => {
+    const saved = localStorage.getItem("AI_CHAT_MODE");
+    return (saved === "agent" || saved === "ask") ? saved : "ask";
+  });
+  const [includeContext, setIncludeContext] = React.useState(() => {
+    return localStorage.getItem("AI_CHAT_INCLUDE_CONTEXT") === "true";
+  });
+  const scrollableRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const modelPickerRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Save chat mode to localStorage when it changes
+  React.useEffect(() => {
+    localStorage.setItem("AI_CHAT_MODE", chatMode);
+  }, [chatMode]);
+
+  // Save include context preference to localStorage when it changes
+  React.useEffect(() => {
+    localStorage.setItem("AI_CHAT_INCLUDE_CONTEXT", String(includeContext));
+  }, [includeContext]);
+
+  useKeyDown("Escape", () => {
+    if (showModelPicker) {
+      setShowModelPicker(false);
+    } else {
+      ui.set({ aiChatExpanded: false });
+    }
+  });
+
+  // Close model picker when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelPickerRef.current && !modelPickerRef.current.contains(event.target as Node)) {
+        setShowModelPicker(false);
+      }
+    };
+
+    if (showModelPicker) {
+      window.addEventListener("mousedown", handleClickOutside);
+      return () => window.removeEventListener("mousedown", handleClickOutside);
+    }
+    return undefined;
+  }, [showModelPicker]);
+
+  // Load available models on mount
+  React.useEffect(() => {
+    void aiChat.loadModels();
+  }, [aiChat]);
+
+  // Get the last message content for auto-scroll dependency
+  const lastMessage = aiChat.messages[aiChat.messages.length - 1];
+  const lastMessageContent = lastMessage?.content;
+  const lastMessageLoading = lastMessage?.isLoading;
+
+  // Auto-scroll to bottom when new messages arrive or when AI is streaming response
+  React.useEffect(() => {
+    if (scrollableRef.current) {
+      scrollableRef.current.scrollTo({
+        top: scrollableRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [aiChat.messages.length, lastMessageContent, lastMessageLoading]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputValue.trim() || aiChat.isLoading) {
+      return;
+    }
+
+    const message = inputValue.trim();
+    setInputValue("");
+
+    // In agent mode, always send full document content as context
+    // In ask mode, send context only if includeContext is enabled
+    let documentContext: string | undefined;
+    if (document) {
+      if (chatMode === "agent" || (chatMode === "ask" && includeContext)) {
+        // Get full document content as markdown
+        // Note: Don't include title as it's not part of the ProseMirror doc
+        // This ensures block numbers match between backend and frontend
+        const markdown = ProsemirrorHelper.toMarkdown(document);
+        documentContext = markdown;
+      }
+    }
+
+    await aiChat.sendMessage(message, documentContext, chatMode);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
+  const handleClearChat = () => {
+    aiChat.clearMessages();
+  };
+
+  const handleSelectModel = (providerId: string, modelId: string) => {
+    aiChat.setProvider(providerId);
+    aiChat.setModel(modelId);
+    setShowModelPicker(false);
+  };
+
+  // Handle accepting an edit - apply it to the document via custom event
+  const handleAcceptEdit = React.useCallback((messageId: string, edit: DocumentEdit) => {
+    if (!document) return;
+
+    // Dispatch a custom event that the editor can listen to
+    const event = new CustomEvent("ai-apply-edit", {
+      detail: {
+        documentId: document.id,
+        edit,
+      },
+    });
+    window.dispatchEvent(event);
+
+    // Mark edit as accepted
+    aiChat.updateEditStatus(messageId, edit.id, "accepted");
+  }, [document, aiChat]);
+
+  // Handle rejecting an edit
+  const handleRejectEdit = React.useCallback((messageId: string, edit: DocumentEdit) => {
+    aiChat.updateEditStatus(messageId, edit.id, "rejected");
+  }, [aiChat]);
+
+  // Handle accepting all pending edits - sort by startLine descending to avoid position shifts
+  const handleAcceptAllEdits = React.useCallback((messageId: string, edits: DocumentEdit[]) => {
+    const pendingEdits = edits
+      .filter(e => e.status === "pending")
+      .sort((a, b) => (b.startLine ?? 0) - (a.startLine ?? 0)); // Apply from bottom to top
+
+    for (const edit of pendingEdits) {
+      handleAcceptEdit(messageId, edit);
+    }
+  }, [handleAcceptEdit]);
+
+  // Handle rejecting all pending edits  
+  const handleRejectAllEdits = React.useCallback((messageId: string, edits: DocumentEdit[]) => {
+    const pendingEdits = edits.filter(e => e.status === "pending");
+    for (const edit of pendingEdits) {
+      handleRejectEdit(messageId, edit);
+    }
+  }, [handleRejectEdit]);
+
+  // Get current model display name
+  const currentModelName = React.useMemo(() => {
+    const model = aiChat.availableModels.find(m => m.id === aiChat.selectedModel);
+    return model?.name || aiChat.selectedModel || t("Select model");
+  }, [aiChat.availableModels, aiChat.selectedModel, t]);
+
+  const content = (
+    <>
+      <Scrollable
+        id="ai-chat"
+        bottomShadow
+        hiddenScrollbars
+        topShadow
+        ref={scrollableRef}
+      >
+        <MessagesWrapper>
+          {aiChat.messages.length > 0 ? (
+            aiChat.messages.map((message) => (
+              <MessageContainer key={message.id} $isUser={message.role === "user"}>
+                <MessageAvatar>
+                  {message.role === "user" ? (
+                    <Avatar model={user} size={24} />
+                  ) : (
+                    <AiAvatar>
+                      <SparklesIcon size={16} color={theme.white} />
+                    </AiAvatar>
+                  )}
+                </MessageAvatar>
+                <MessageBubble $isUser={message.role === "user"}>
+                  {message.isLoading ? (
+                    <LoadingDots>
+                      <span />
+                      <span />
+                      <span />
+                    </LoadingDots>
+                  ) : message.role === "user" ? (
+                    <MessageContent>{message.content}</MessageContent>
+                  ) : (
+                    <>
+                      <MarkdownContent
+                        dangerouslySetInnerHTML={{
+                          __html: md.render(message.content),
+                        }}
+                      />
+                      {/* Render edits if any */}
+                      {message.edits && message.edits.length > 0 && (
+                        <EditsContainer>
+                          <EditsHeader>
+                            <EditsTitle>{t("Proposed Changes")}</EditsTitle>
+                            {message.edits.some(e => e.status === "pending") && (
+                              <EditsActions>
+                                <Tooltip content={t("Accept all")} placement="top">
+                                  <ActionButton
+                                    onClick={() => handleAcceptAllEdits(message.id, message.edits!)}
+                                    $variant="accept"
+                                  >
+                                    <CheckmarkIcon size={14} />
+                                  </ActionButton>
+                                </Tooltip>
+                                <Tooltip content={t("Reject all")} placement="top">
+                                  <ActionButton
+                                    onClick={() => handleRejectAllEdits(message.id, message.edits!)}
+                                    $variant="reject"
+                                  >
+                                    <CloseIcon size={14} />
+                                  </ActionButton>
+                                </Tooltip>
+                              </EditsActions>
+                            )}
+                          </EditsHeader>
+                          {message.edits.map((edit) => (
+                            <EditCard key={edit.id} $status={edit.status}>
+                              <EditDescription>{edit.description}</EditDescription>
+                              <DiffContainer>
+                                {edit.oldContent && (
+                                  <DiffLine $type="remove">
+                                    <DiffPrefix>-</DiffPrefix>
+                                    <DiffContent>
+                                      {edit.oldContent.length > 300
+                                        ? `${edit.oldContent.substring(0, 300)}...`
+                                        : edit.oldContent}
+                                    </DiffContent>
+                                  </DiffLine>
+                                )}
+                                {edit.newContent && (
+                                  <DiffLine $type="add">
+                                    <DiffPrefix>+</DiffPrefix>
+                                    <DiffContent>
+                                      {edit.newContent.length > 300
+                                        ? `${edit.newContent.substring(0, 300)}...`
+                                        : edit.newContent}
+                                    </DiffContent>
+                                  </DiffLine>
+                                )}
+                                {/* Show deletion message only if no oldContent was provided */}
+                                {!edit.oldContent && !edit.newContent && edit.type === "delete" && (
+                                  <DiffLine $type="remove">
+                                    <DiffPrefix>-</DiffPrefix>
+                                    <DiffContent>{t("Section will be deleted")}</DiffContent>
+                                  </DiffLine>
+                                )}
+                              </DiffContainer>
+                              {edit.status === "pending" ? (
+                                <EditActions>
+                                  <EditButton
+                                    onClick={() => handleAcceptEdit(message.id, edit)}
+                                    $variant="accept"
+                                  >
+                                    <CheckmarkIcon size={14} />
+                                    {t("Accept")}
+                                  </EditButton>
+                                  <EditButton
+                                    onClick={() => handleRejectEdit(message.id, edit)}
+                                    $variant="reject"
+                                  >
+                                    <CloseIcon size={14} />
+                                    {t("Reject")}
+                                  </EditButton>
+                                </EditActions>
+                              ) : (
+                                <EditStatus $status={edit.status}>
+                                  {edit.status === "accepted" ? t("Accepted") : t("Rejected")}
+                                </EditStatus>
+                              )}
+                            </EditCard>
+                          ))}
+                        </EditsContainer>
+                      )}
+                    </>
+                  )}
+                </MessageBubble>
+              </MessageContainer>
+            ))
+          ) : (
+            <EmptyState align="center" justify="center" auto>
+              <EmptyContent>
+                <SparklesIcon size={48} color={theme.textTertiary} />
+                <EmptyTitle>{t("AI Assistant")}</EmptyTitle>
+                <EmptyDescription>
+                  {t("Ask questions about this document or get help with your writing.")}
+                </EmptyDescription>
+              </EmptyContent>
+            </EmptyState>
+          )}
+        </MessagesWrapper>
+      </Scrollable>
+
+      <InputContainer onSubmit={handleSubmit}>
+        {aiChat.error && (
+          <ErrorContainer>
+            <ErrorMessage>{aiChat.error}</ErrorMessage>
+            <RetryButton
+              type="button"
+              onClick={() => aiChat.retry()}
+              disabled={aiChat.isLoading}
+            >
+              <RestoreIcon size={14} />
+              {t("Try again")}
+            </RetryButton>
+          </ErrorContainer>
+        )}
+        <StyledTextarea
+          ref={inputRef}
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={chatMode === "agent" ? t("Describe what you want the agent to do...") : t("Ask AI anything...")}
+          disabled={aiChat.isLoading}
+          rows={1}
+        />
+        <BottomRow>
+          <LeftControls>
+            {/* Mode Toggle */}
+            <ModeToggle>
+              <ModeButton
+                $active={chatMode === "ask"}
+                onClick={() => setChatMode("ask")}
+                type="button"
+              >
+                {t("Ask")}
+              </ModeButton>
+              <ModeButton
+                $active={chatMode === "agent"}
+                onClick={() => setChatMode("agent")}
+                type="button"
+              >
+                {t("Agent")}
+              </ModeButton>
+            </ModeToggle>
+
+            {/* Context Toggle (only in Ask mode) */}
+            {chatMode === "ask" && document && (
+              <Tooltip content={includeContext ? t("Document context enabled") : t("Add document as context")} placement="top">
+                <ContextToggleButton
+                  type="button"
+                  $active={includeContext}
+                  onClick={() => setIncludeContext(!includeContext)}
+                >
+                  <DocumentIcon size={16} />
+                </ContextToggleButton>
+              </Tooltip>
+            )}
+
+            {/* Model Picker */}
+            {aiChat.providers.length > 0 && (
+              <ModelPickerContainer ref={modelPickerRef}>
+                <ModelPickerButton
+                  type="button"
+                  onClick={() => setShowModelPicker(!showModelPicker)}
+                >
+                  <span>{currentModelName}</span>
+                  <DropdownArrow size={16} />
+                </ModelPickerButton>
+
+                {showModelPicker && (
+                  <ModelPickerDropdown>
+                    {aiChat.providers.map((provider) => (
+                      <ProviderSection key={provider.id}>
+                        <ProviderName>{provider.name}</ProviderName>
+                        {provider.models.map((model) => (
+                          <ModelOption
+                            key={model.id}
+                            $selected={aiChat.selectedModel === model.id && aiChat.selectedProvider === provider.id}
+                            onClick={() => handleSelectModel(provider.id, model.id)}
+                          >
+                            <ModelName>{model.name}</ModelName>
+                            {aiChat.selectedModel === model.id && aiChat.selectedProvider === provider.id && (
+                              <SelectedIndicator>✓</SelectedIndicator>
+                            )}
+                          </ModelOption>
+                        ))}
+                      </ProviderSection>
+                    ))}
+                  </ModelPickerDropdown>
+                )}
+              </ModelPickerContainer>
+            )}
+          </LeftControls>
+
+          <ButtonSmall
+            type="submit"
+            disabled={!inputValue.trim() || aiChat.isLoading}
+            borderOnHover
+          >
+            {aiChat.isLoading ? t("Thinking...") : t("Send")}
+          </ButtonSmall>
+        </BottomRow>
+      </InputContainer>
+    </>
+  );
+
+  return (
+    <Sidebar
+      title={
+        <Flex align="center" justify="space-between" gap={8} auto>
+          <TitleWrapper>
+            <SparklesIcon size={20} />
+            <span>{t("AI Chat")}</span>
+          </TitleWrapper>
+          {aiChat.hasMessages && (
+            <Tooltip content={t("Clear chat")} placement="bottom">
+              <NudeButton onClick={handleClearChat}>
+                <TrashIcon size={18} color={theme.textTertiary} />
+              </NudeButton>
+            </Tooltip>
+          )}
+        </Flex>
+      }
+      onClose={() => ui.set({ aiChatExpanded: false })}
+      scrollable={false}
+    >
+      {content}
+    </Sidebar>
+  );
+}
+
+const TitleWrapper = styled(Flex)`
+  align-items: center;
+  gap: 8px;
+`;
+
+const MessagesWrapper = styled.div`
+  padding: 12px;
+  min-height: 100%;
+`;
+
+const EmptyState = styled(Flex)`
+  height: 100%;
+  min-height: 300px;
+`;
+
+const EmptyContent = styled.div`
+  text-align: center;
+  padding: 24px;
+`;
+
+const EmptyTitle = styled.h3`
+  margin: 16px 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: ${s("text")};
+`;
+
+const EmptyDescription = styled.p`
+  margin: 0;
+  font-size: 14px;
+  color: ${s("textTertiary")};
+  max-width: 240px;
+`;
+
+const MessageContainer = styled.div<{ $isUser: boolean }>`
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-direction: ${(props) => (props.$isUser ? "row-reverse" : "row")};
+`;
+
+const MessageAvatar = styled.div`
+  flex-shrink: 0;
+`;
+
+const AiAvatar = styled.div`
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const MessageBubble = styled.div<{ $isUser: boolean }>`
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: ${(props) =>
+    props.$isUser ? props.theme.accent : props.theme.sidebarBackground};
+  color: ${(props) =>
+    props.$isUser ? props.theme.white : props.theme.text};
+  border-bottom-right-radius: ${(props) => (props.$isUser ? "4px" : "16px")};
+  border-bottom-left-radius: ${(props) => (props.$isUser ? "16px" : "4px")};
+`;
+
+const MessageContent = styled.div`
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+`;
+
+const MarkdownContent = styled.div`
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+
+  p {
+    margin: 0 0 8px 0;
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  strong {
+    font-weight: 600;
+  }
+
+  em {
+    font-style: italic;
+  }
+
+  code {
+    background: ${s("codeBackground")};
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+  }
+
+  pre {
+    background: ${s("codeBackground")};
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 8px 0;
+
+    code {
+      background: none;
+      padding: 0;
+    }
+  }
+
+  ul, ol {
+    margin: 8px 0;
+    padding-left: 20px;
+  }
+
+  li {
+    margin: 4px 0;
+  }
+
+  a {
+    color: ${s("accent")};
+    text-decoration: none;
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  blockquote {
+    border-left: 3px solid ${s("accent")};
+    margin: 8px 0;
+    padding-left: 12px;
+    color: ${s("textSecondary")};
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    margin: 12px 0 8px 0;
+    font-weight: 600;
+  }
+
+  h1 { font-size: 1.3em; }
+  h2 { font-size: 1.2em; }
+  h3 { font-size: 1.1em; }
+`;
+
+const LoadingDots = styled.div`
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+
+  span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: ${s("textTertiary")};
+    animation: bounce 1.4s infinite ease-in-out both;
+
+    &:nth-child(1) {
+      animation-delay: -0.32s;
+    }
+    &:nth-child(2) {
+      animation-delay: -0.16s;
+    }
+  }
+
+  @keyframes bounce {
+    0%, 80%, 100% {
+      transform: scale(0);
+    }
+    40% {
+      transform: scale(1);
+    }
+  }
+`;
+
+const InputContainer = styled.form`
+  padding: 12px;
+  border-top: 1px solid ${s("divider")};
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const ErrorContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: ${(props) => props.theme.danger}10;
+  border-radius: 4px;
+`;
+
+const ErrorMessage = styled.div`
+  color: ${s("danger")};
+  font-size: 12px;
+  flex: 1;
+`;
+
+const RetryButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: ${s("danger")};
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const StyledTextarea = styled.textarea`
+  width: 100%;
+  min-height: 40px;
+  max-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid ${s("inputBorder")};
+  border-radius: 8px;
+  background: ${s("background")};
+  color: ${s("text")};
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  transition: border-color 0.2s;
+
+  &:focus {
+    border-color: ${s("accent")};
+  }
+
+  &::placeholder {
+    color: ${s("textTertiary")};
+  }
+
+  &:disabled {
+    opacity: 0.6;
+  }
+`;
+
+const BottomRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+`;
+
+const LeftControls = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+`;
+
+const ModeToggle = styled.div`
+  display: flex;
+  background: ${s("sidebarBackground")};
+  border-radius: 6px;
+  padding: 2px;
+`;
+
+const ModeButton = styled.button<{ $active: boolean }>`
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: ${(props) => (props.$active ? props.theme.accent : "transparent")};
+  color: ${(props) => (props.$active ? props.theme.white : props.theme.textTertiary)};
+
+  &:hover {
+    color: ${(props) => (props.$active ? props.theme.white : props.theme.text)};
+  }
+`;
+
+const ContextToggleButton = styled.button<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: ${(props) => (props.$active ? props.theme.accent + "20" : "transparent")};
+  color: ${(props) => (props.$active ? props.theme.accent : props.theme.textTertiary)};
+
+  &:hover {
+    background: ${(props) => (props.$active ? props.theme.accent + "30" : props.theme.sidebarBackground)};
+    color: ${(props) => (props.$active ? props.theme.accent : props.theme.text)};
+  }
+`;
+
+const ModelPickerContainer = styled.div`
+  position: relative;
+`;
+
+const ModelPickerButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: ${s("textTertiary")};
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  max-width: 150px;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    background: ${s("sidebarBackground")};
+    color: ${s("text")};
+  }
+`;
+
+const ModelPickerDropdown = styled.div`
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  min-width: 200px;
+  max-width: 280px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: ${s("menuBackground")};
+  border: 1px solid ${s("inputBorder")};
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+`;
+
+const ProviderSection = styled.div`
+  &:not(:last-child) {
+    border-bottom: 1px solid ${s("divider")};
+  }
+`;
+
+const ProviderName = styled.div`
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: ${s("textTertiary")};
+  letter-spacing: 0.5px;
+`;
+
+const ModelOption = styled.div<{ $selected: boolean }>`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: ${(props) => (props.$selected ? props.theme.accent + "15" : "transparent")};
+  transition: background 0.1s ease;
+
+  &:hover {
+    background: ${(props) => (props.$selected ? props.theme.accent + "20" : props.theme.sidebarBackground)};
+  }
+`;
+
+const ModelName = styled.span`
+  font-size: 13px;
+  color: ${s("text")};
+`;
+
+const SelectedIndicator = styled.span`
+  color: ${s("accent")};
+  font-weight: 600;
+`;
+
+const DropdownArrow = styled(ArrowDownIcon)`
+  flex-shrink: 0;
+  opacity: 0.7;
+`;
+
+// Edit/Diff related styles
+const EditsContainer = styled.div`
+  margin-top: 12px;
+  border-top: 1px solid ${s("divider")};
+  padding-top: 12px;
+`;
+
+const EditsHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+`;
+
+const EditsTitle = styled.div`
+  font-size: 12px;
+  font-weight: 600;
+  color: ${s("textSecondary")};
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+const EditsActions = styled.div`
+  display: flex;
+  gap: 4px;
+`;
+
+const ActionButton = styled.button<{ $variant: "accept" | "reject" }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: ${(props) =>
+    props.$variant === "accept"
+      ? props.theme.brand.green + "20"
+      : props.theme.danger + "20"};
+  color: ${(props) =>
+    props.$variant === "accept"
+      ? props.theme.brand.green
+      : props.theme.danger};
+
+  &:hover {
+    background: ${(props) =>
+    props.$variant === "accept"
+      ? props.theme.brand.green + "40"
+      : props.theme.danger + "40"};
+  }
+`;
+
+const EditCard = styled.div<{ $status: "pending" | "accepted" | "rejected" }>`
+  background: ${s("background")};
+  border: 1px solid ${(props) =>
+    props.$status === "accepted"
+      ? props.theme.brand.green + "50"
+      : props.$status === "rejected"
+        ? props.theme.danger + "50"
+        : props.theme.inputBorder};
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  opacity: ${(props) => props.$status !== "pending" ? 0.7 : 1};
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const EditDescription = styled.div`
+  font-size: 12px;
+  color: ${s("textSecondary")};
+  margin-bottom: 8px;
+`;
+
+const DiffContainer = styled.div`
+  background: ${s("codeBackground")};
+  border-radius: 6px;
+  padding: 8px;
+  font-family: monospace;
+  font-size: 12px;
+  overflow-x: auto;
+  margin-bottom: 8px;
+`;
+
+const DiffLine = styled.div<{ $type: "add" | "remove" }>`
+  display: flex;
+  background: ${(props) =>
+    props.$type === "add"
+      ? props.theme.brand.green + "15"
+      : props.theme.danger + "15"};
+  padding: 2px 4px;
+  border-radius: 2px;
+  margin: 2px 0;
+`;
+
+const DiffPrefix = styled.span`
+  width: 16px;
+  flex-shrink: 0;
+  color: ${s("textTertiary")};
+  user-select: none;
+`;
+
+const DiffContent = styled.span`
+  white-space: pre-wrap;
+  word-break: break-word;
+`;
+
+const EditActions = styled.div`
+  display: flex;
+  gap: 8px;
+`;
+
+const EditButton = styled.button<{ $variant: "accept" | "reject" }>`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: ${(props) =>
+    props.$variant === "accept"
+      ? props.theme.brand.green
+      : props.theme.danger};
+  color: white;
+
+  &:hover {
+    opacity: 0.9;
+  }
+`;
+
+const EditStatus = styled.div<{ $status: "accepted" | "rejected" }>`
+  font-size: 11px;
+  font-weight: 500;
+  color: ${(props) =>
+    props.$status === "accepted"
+      ? props.theme.brand.green
+      : props.theme.danger};
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+export default observer(AiChat);

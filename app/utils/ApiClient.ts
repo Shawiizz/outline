@@ -33,6 +33,7 @@ interface FetchOptions {
   retry?: boolean;
   credentials?: "omit" | "same-origin" | "include";
   headers?: Record<string, string>;
+  timeout?: number; // Timeout in milliseconds
 }
 
 const fetchWithRetry = retry(fetch);
@@ -134,18 +135,34 @@ class ApiClient {
     let response;
 
     try {
-      response = await (options?.retry === false ? fetch : fetchWithRetry)(
-        urlToFetch,
-        {
-          method,
-          body,
-          headers,
-          redirect: "follow",
-          credentials: "same-origin",
-          cache: "no-cache",
-        }
-      );
+      // Create abort controller for timeout
+      const controller = new AbortController();
+      const timeoutId = options?.timeout
+        ? setTimeout(() => controller.abort(), options.timeout)
+        : undefined;
+
+      try {
+        response = await (options?.retry === false ? fetch : fetchWithRetry)(
+          urlToFetch,
+          {
+            method,
+            body,
+            headers,
+            redirect: "follow",
+            credentials: "same-origin",
+            cache: "no-cache",
+            signal: controller.signal,
+          }
+        );
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     } catch (_err) {
+      const err = _err as Error;
+      // Check if it was a timeout/abort
+      if (err.name === "AbortError") {
+        throw new NetworkError("Request timed out, the AI may still be processing. Try again?");
+      }
       if (window.navigator.onLine) {
         throw new NetworkError("A network error occurred, try again?");
       } else {

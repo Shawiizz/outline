@@ -37,6 +37,9 @@ const DocumentComments = lazyWithRetry(
 const DocumentHistory = lazyWithRetry(
   () => import("~/scenes/Document/components/History")
 );
+const DocumentAiChat = lazyWithRetry(
+  () => import("~/scenes/Document/components/AiChat")
+);
 const SettingsSidebar = lazyWithRetry(
   () => import("~/components/Sidebar/Settings")
 );
@@ -101,17 +104,23 @@ const AuthenticatedLayout: React.FC = ({ children }: Props) => {
     ui.activeDocumentId &&
     ui.commentsExpanded &&
     !!team.getPreference(TeamPreference.Commenting);
+  const showAiChat =
+    !showHistory &&
+    !showComments &&
+    ui.activeDocumentId &&
+    ui.aiChatExpanded;
 
   const sidebarRight = (
     <AnimatePresence
       initial={false}
       key={ui.activeDocumentId ? "active" : "inactive"}
     >
-      {(showHistory || showComments) && (
+      {(showHistory || showComments || showAiChat) && (
         <Route path={`/doc/${slug}`}>
           <React.Suspense fallback={null}>
             {showHistory && <DocumentHistory />}
             {showComments && <DocumentComments />}
+            {showAiChat && <DocumentAiChat />}
           </React.Suspense>
         </Route>
       )}

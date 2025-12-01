@@ -1,6 +1,6 @@
 import { LocationDescriptor } from "history";
 import { observer, useObserver } from "mobx-react";
-import { CommentIcon } from "outline-icons";
+import { CommentIcon, SparklesIcon } from "outline-icons";
 import { useRef, Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -62,6 +62,19 @@ function TitleDocumentMeta({ to, document, revision, ...rest }: Props) {
           </CommentLink>
         </>
       )}
+      <>
+        <Separator />
+        <AiChatLink
+          to={{
+            pathname: documentPath(document),
+            state: { sidebarContext },
+          }}
+          onClick={() => ui.toggleAiChat()}
+        >
+          <SparklesIcon size={18} />
+          {t("AI Chat")}
+        </AiChatLink>
+      </>
       {totalViewers &&
       can.listViews &&
       !document.isDraft &&
@@ -85,6 +98,12 @@ function TitleDocumentMeta({ to, document, revision, ...rest }: Props) {
 const CommentLink = styled(Link)`
   display: inline-flex;
   align-items: center;
+`;
+
+const AiChatLink = styled(Link)`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 `;
 
 const InsightsButton = styled(NudeButton)`

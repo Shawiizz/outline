@@ -32,6 +32,7 @@ import {
   CaseSensitiveIcon,
   RestoreIcon,
   EditIcon,
+  SparklesIcon,
 } from "outline-icons";
 import { toast } from "sonner";
 import Icon from "@shared/components/Icon";
@@ -1376,6 +1377,21 @@ export const openDocumentComments = createActionV2({
   },
 });
 
+export const openAiChat = createActionV2({
+  name: ({ t }) => t("AI Chat"),
+  analyticsName: "Open AI chat",
+  section: ActiveDocumentSection,
+  icon: <SparklesIcon />,
+  visible: ({ activeDocumentId }) => !!activeDocumentId,
+  perform: ({ activeDocumentId, stores }) => {
+    if (!activeDocumentId) {
+      return;
+    }
+
+    stores.ui.toggleAiChat();
+  },
+});
+
 export const openDocumentHistory = createInternalLinkActionV2({
   name: ({ t }) => t("History"),
   analyticsName: "Open document history",
@@ -1525,6 +1541,7 @@ export const rootDocumentActions = [
   pinDocumentToCollection,
   pinDocumentToHome,
   openDocumentComments,
+  openAiChat,
   openDocumentHistory,
   openDocumentInsights,
   shareDocument,

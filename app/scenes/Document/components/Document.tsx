@@ -116,6 +116,7 @@ class DocumentScene extends React.Component<Props> {
 
   componentDidMount() {
     this.updateIsDirty();
+    window.addEventListener("ai-apply-edit", this.handleAiEdit as EventListener);
   }
 
   componentDidUpdate(prevProps: Props) {
@@ -125,6 +126,8 @@ class DocumentScene extends React.Component<Props> {
   }
 
   componentWillUnmount() {
+    window.removeEventListener("ai-apply-edit", this.handleAiEdit as EventListener);
+
     if (
       this.isEmpty &&
       this.props.document.createdBy?.id === this.props.auth.user?.id &&
@@ -140,6 +143,487 @@ class DocumentScene extends React.Component<Props> {
       });
     }
   }
+
+  /**
+   * Handles AI edit events from the AiChat component
+   */
+  handleAiEdit = (event: CustomEvent<{
+    documentId: string; edit: {
+      type: string;
+      startLine?: number;
+      endLine?: number;
+      insert?: boolean;
+      oldContent?: string;
+      newContent: string;
+      contextBefore?: string;
+      contextAfter?: string;
+    }
+  }>) => {
+    const { documentId, edit } = event.detail;
+
+    console.log("[AI Edit] Received event:", { documentId, edit });
+
+    // Only apply if this is the correct document
+    if (documentId !== this.props.document.id) {
+      console.log("[AI Edit] Wrong document, ignoring");
+      return;
+    }
+
+    const editorRef = this.editor.current;
+    if (!editorRef) {
+      console.log("[AI Edit] No editor ref");
+      return;
+    }
+
+    const { view, schema, parser } = editorRef;
+
+    // ============ HELPER FUNCTIONS ============
+
+    // Parse markdown content into ProseMirror nodes
+    const parseMarkdownContent = (markdown: string) => {
+      try {
+        const parsed = parser.parse(markdown);
+        if (parsed && parsed.content.childCount > 0) {
+          return parsed.content;
+        }
+      } catch (e) {
+        console.error("[AI Edit] Error parsing markdown:", e);
+      }
+      return schema.text(markdown);
+    };
+
+    // Get document content as blocks with their positions
+    // This must match how the backend parses markdown into blocks
+    const getDocumentBlocks = (): Array<{ blockNum: number; from: number; to: number; text: string; node: any; type: string }> => {
+      const blocks: Array<{ blockNum: number; from: number; to: number; text: string; node: any; type: string }> = [];
+      let blockNum = 1;
+
+      // Recursively collect leaf blocks (paragraphs, headings, code blocks, etc.)
+      const collectBlocks = (node: any, pos: number) => {
+        // These are "leaf" block types that correspond to markdown lines
+        const leafBlockTypes = [
+          'paragraph', 'heading', 'code_block', 'code_fence',
+          'math_block', 'math_display', 'horizontal_rule',
+          'blockquote', 'image', 'video', 'embed'
+        ];
+
+        if (leafBlockTypes.includes(node.type.name)) {
+          blocks.push({
+            blockNum,
+            from: pos,
+            to: pos + node.nodeSize,
+            text: node.textContent,
+            node,
+            type: node.type.name
+          });
+          blockNum++;
+          return false; // Don't descend
+        }
+
+        // For list items, each one is a block
+        if (node.type.name === 'list_item' || node.type.name === 'checkbox_item') {
+          blocks.push({
+            blockNum,
+            from: pos,
+            to: pos + node.nodeSize,
+            text: node.textContent,
+            node,
+            type: node.type.name
+          });
+          blockNum++;
+          return false; // Don't descend into list item children
+        }
+
+        // For containers (doc, bullet_list, ordered_list, etc.), descend into children
+        if (node.content) {
+          let childPos = pos + 1; // +1 for the opening of the container
+          node.content.forEach((child: any) => {
+            collectBlocks(child, childPos);
+            childPos += child.nodeSize;
+          });
+        }
+
+        return false;
+      };
+
+      // Start from doc's children
+      let pos = 0;
+      view.state.doc.content.forEach((node: any) => {
+        collectBlocks(node, pos);
+        pos += node.nodeSize;
+      });
+
+      console.log("[AI Edit] Document blocks:", blocks.map(b => ({ num: b.blockNum, type: b.type, text: b.text.substring(0, 50) })));
+
+      return blocks;
+    };
+
+    // ============ LINE-BASED EDITING (NEW SYSTEM) ============
+
+    if (edit.startLine !== undefined) {
+      console.log("[AI Edit] Using block-based edit:", edit.startLine, "-", edit.endLine);
+
+      const blocks = getDocumentBlocks();
+      console.log("[AI Edit] Document has", blocks.length, "blocks");
+
+      const startBlock = edit.startLine;
+      const endBlock = edit.endLine ?? startBlock;
+
+      // Find the block positions
+      const startBlockData = blocks.find(b => b.blockNum === startBlock);
+      const endBlockData = blocks.find(b => b.blockNum === endBlock);
+
+      if (!startBlockData) {
+        console.log("[AI Edit] Start block not found:", startBlock, "- available blocks:", blocks.map(b => b.blockNum));
+        return;
+      }
+
+      const fromPos = startBlockData.from;
+      const toPos = endBlockData ? endBlockData.to : startBlockData.to;
+
+      console.log("[AI Edit] Block positions:", fromPos, "-", toPos, "for blocks", startBlock, "-", endBlock);
+      console.log("[AI Edit] Block type:", startBlockData.type);
+
+      try {
+        const tr = view.state.tr;
+
+        // Trim newContent to avoid creating empty paragraphs
+        let trimmedContent = edit.newContent?.trim() || "";
+
+        // For list items, strip the list marker from AI response (e.g., "1. " or "- ")
+        // since we're replacing the content inside the list_item, not the whole list
+        const isListItem = startBlockData.type === 'list_item' || startBlockData.type === 'checkbox_item';
+        if (isListItem && trimmedContent) {
+          // Remove leading list markers like "1. ", "2. ", "- ", "* ", "- [ ] ", "- [x] "
+          trimmedContent = trimmedContent
+            .replace(/^\d+\.\s+/, '')  // Ordered list: "1. ", "2. ", etc.
+            .replace(/^[-*]\s+/, '')    // Unordered list: "- ", "* "
+            .replace(/^[-*]\s*\[[ x]\]\s*/i, ''); // Checkbox: "- [ ] ", "- [x] "
+        }
+
+        if (edit.insert) {
+          // Insert after the specified block
+          const insertPos = startBlockData.to;
+          const content = parseMarkdownContent(trimmedContent);
+          tr.insert(insertPos, content);
+          console.log("[AI Edit] Insert done at position", insertPos);
+        } else if (!trimmedContent) {
+          // Delete the blocks
+          tr.delete(fromPos, toPos);
+          console.log("[AI Edit] Delete done");
+        } else if (isListItem) {
+          // For list items, replace just the text content inside, not the whole node
+          // Find the paragraph inside the list_item
+          const listItemNode = startBlockData.node;
+          if (listItemNode.content && listItemNode.content.childCount > 0) {
+            const firstChild = listItemNode.content.child(0);
+            // Replace the content of the first child (usually a paragraph)
+            const innerFrom = fromPos + 1; // +1 to skip the list_item opening
+            const innerTo = innerFrom + firstChild.nodeSize;
+
+            // Create a new paragraph with the new text
+            const newParagraph = schema.nodes.paragraph.create(null, schema.text(trimmedContent));
+            tr.replaceWith(innerFrom, innerTo, newParagraph);
+            console.log("[AI Edit] List item content replaced");
+          } else {
+            // Fallback: just replace text
+            const content = schema.text(trimmedContent);
+            tr.replaceWith(fromPos + 1, toPos - 1, content);
+          }
+        } else {
+          // Replace the blocks
+          const content = parseMarkdownContent(trimmedContent);
+          tr.replaceWith(fromPos, toPos, content);
+          console.log("[AI Edit] Replace done");
+        }
+
+        view.dispatch(tr);
+        this.isEditorDirty = true;
+        this.updateIsDirty();
+      } catch (error) {
+        console.error("[AI Edit] Error applying block-based edit:", error);
+      }
+      return;
+    }
+
+    // ============ LEGACY TEXT-BASED EDITING (FALLBACK) ============
+
+    console.log("[AI Edit] Using legacy text-based edit, type:", edit.type);
+
+    // Find the position of a text match, expanding to include the full block if applicable
+    const findBestMatch = (searchText: string, contextBefore?: string, contextAfter?: string): { from: number; to: number } | null => {
+      // Clean up search text - remove markdown wrappers if AI included them by mistake
+      let cleanSearch = searchText
+        .replace(/^```\w*\n?/, '').replace(/\n?```$/, '')  // Remove code fences
+        .replace(/^\$\$\n?/, '').replace(/\n?\$\$$/, '')   // Remove math delimiters
+        .replace(/^\$/, '').replace(/\$$/, '');             // Remove inline math
+
+      // Normalize whitespace
+      const normalizeWs = (s: string) => s.replace(/\s+/g, ' ').trim();
+      const searchNorm = normalizeWs(cleanSearch);
+
+      if (searchNorm.length < 3) {
+        console.log("[AI Edit] Search text too short");
+        return null;
+      }
+
+      console.log("[AI Edit] Searching for:", searchNorm.substring(0, 100) + (searchNorm.length > 100 ? "..." : ""));
+
+      // Get full document text
+      const fullText = view.state.doc.textContent;
+      const fullTextNorm = normalizeWs(fullText);
+
+      // Build character position map: textIndex -> docPosition
+      const posMap: number[] = [];
+      view.state.doc.descendants((node, pos) => {
+        if (node.isText && node.text) {
+          for (let i = 0; i < node.text.length; i++) {
+            posMap.push(pos + i);
+          }
+        }
+        return true;
+      });
+
+      // Strategy 1: Exact match (normalized whitespace)
+      let matchIndex = fullTextNorm.indexOf(searchNorm);
+      let matchLength = searchNorm.length;
+
+      // Strategy 2: Case-insensitive match
+      if (matchIndex === -1) {
+        matchIndex = fullTextNorm.toLowerCase().indexOf(searchNorm.toLowerCase());
+        if (matchIndex !== -1) console.log("[AI Edit] Case-insensitive match");
+      }
+
+      // Strategy 3: Find longest common substring (for partial matches)
+      if (matchIndex === -1 && searchNorm.length > 20) {
+        const findLongestMatch = (needle: string, haystack: string): { index: number; length: number } | null => {
+          const needleLower = needle.toLowerCase();
+          const haystackLower = haystack.toLowerCase();
+
+          // Try progressively shorter substrings from the start
+          for (let len = Math.min(needle.length, 200); len >= 15; len -= 5) {
+            const substr = needleLower.substring(0, len);
+            const idx = haystackLower.indexOf(substr);
+            if (idx !== -1) {
+              // Try to extend the match forward
+              let actualLen = len;
+              while (actualLen < needle.length &&
+                idx + actualLen < haystack.length &&
+                needleLower[actualLen] === haystackLower[idx + actualLen]) {
+                actualLen++;
+              }
+              return { index: idx, length: actualLen };
+            }
+          }
+
+          // Try from different positions in the search text
+          const chunks = needle.split(/\s+/).filter(c => c.length > 5);
+          for (const chunk of chunks.slice(0, 5)) {
+            const idx = haystackLower.indexOf(chunk.toLowerCase());
+            if (idx !== -1) {
+              // Found a chunk, try to expand
+              let start = idx;
+              let end = idx + chunk.length;
+
+              // Expand backwards
+              let needlePos = needle.toLowerCase().indexOf(chunk.toLowerCase());
+              while (start > 0 && needlePos > 0 &&
+                haystackLower[start - 1] === needleLower[needlePos - 1]) {
+                start--;
+                needlePos--;
+              }
+
+              // Expand forwards
+              needlePos = needle.toLowerCase().indexOf(chunk.toLowerCase()) + chunk.length;
+              while (end < haystack.length && needlePos < needle.length &&
+                haystackLower[end] === needleLower[needlePos]) {
+                end++;
+                needlePos++;
+              }
+
+              if (end - start >= 15) {
+                return { index: start, length: end - start };
+              }
+            }
+          }
+
+          return null;
+        };
+
+        const longestMatch = findLongestMatch(searchNorm, fullTextNorm);
+        if (longestMatch && longestMatch.length >= 15) {
+          matchIndex = longestMatch.index;
+          matchLength = longestMatch.length;
+          console.log("[AI Edit] Longest substring match, length:", matchLength);
+        }
+      }
+
+      // Strategy 4: Line-by-line matching
+      if (matchIndex === -1) {
+        const searchLines = cleanSearch.split(/\n/).filter(l => l.trim().length > 8);
+        for (const line of searchLines) {
+          const lineNorm = normalizeWs(line);
+          if (lineNorm.length < 8) continue;
+
+          let idx = fullTextNorm.indexOf(lineNorm);
+          if (idx === -1) {
+            idx = fullTextNorm.toLowerCase().indexOf(lineNorm.toLowerCase());
+          }
+          if (idx !== -1) {
+            matchIndex = idx;
+            matchLength = lineNorm.length;
+            console.log("[AI Edit] Line match found:", lineNorm.substring(0, 50));
+            break;
+          }
+        }
+      }
+
+      if (matchIndex === -1) {
+        console.log("[AI Edit] No match found in document");
+        return null;
+      }
+
+      // Convert normalized index to document position
+      // This is approximate due to whitespace normalization
+      const endIdx = Math.min(matchIndex + matchLength, posMap.length - 1);
+
+      if (posMap[matchIndex] === undefined) {
+        console.log("[AI Edit] Could not map start position");
+        return null;
+      }
+
+      let matchFrom = posMap[matchIndex];
+      let matchTo = posMap[endIdx] !== undefined ? posMap[endIdx] + 1 : matchFrom + matchLength;
+
+      console.log("[AI Edit] Raw match:", matchFrom, "-", matchTo);
+
+      // Try to expand to containing block for cleaner edits
+      let expandedToBlock = false;
+      view.state.doc.descendants((node, pos) => {
+        if (expandedToBlock) return false;
+
+        const nodeEnd = pos + node.nodeSize;
+        const isBlock = node.type.name === 'code_block' || node.type.name === 'code_fence' ||
+          node.type.name === 'math_block' || node.type.name === 'math_display' ||
+          node.type.name === 'paragraph';
+
+        // If the match overlaps significantly with this block, use the block
+        if (isBlock && pos <= matchFrom && nodeEnd >= matchTo) {
+          const matchLen = matchTo - matchFrom;
+          const blockLen = node.textContent.length;
+          const overlapRatio = matchLen / blockLen;
+
+          // If match covers > 50% of block content, use full block
+          if (overlapRatio > 0.5) {
+            matchFrom = pos;
+            matchTo = nodeEnd;
+            expandedToBlock = true;
+            console.log("[AI Edit] Expanded to full", node.type.name, "overlap:", (overlapRatio * 100).toFixed(0) + "%");
+            return false;
+          }
+        }
+        return true;
+      });
+
+      console.log("[AI Edit] Final match:", matchFrom, "-", matchTo);
+      return { from: matchFrom, to: matchTo };
+    };
+
+    // ============ HANDLE EDIT TYPES ============
+
+    console.log("[AI Edit] Edit type:", edit.type);
+
+    // Handle prepend
+    if (edit.type === "prepend") {
+      try {
+        const tr = view.state.tr;
+        tr.insert(0, parseMarkdownContent(edit.newContent));
+        view.dispatch(tr);
+        this.isEditorDirty = true;
+        this.updateIsDirty();
+        console.log("[AI Edit] Prepend done");
+      } catch (error) {
+        console.error("[AI Edit] Error:", error);
+      }
+      return;
+    }
+
+    // Handle append
+    if (edit.type === "append") {
+      try {
+        const tr = view.state.tr;
+        tr.insert(view.state.doc.content.size, parseMarkdownContent(edit.newContent));
+        view.dispatch(tr);
+        this.isEditorDirty = true;
+        this.updateIsDirty();
+        console.log("[AI Edit] Append done");
+      } catch (error) {
+        console.error("[AI Edit] Error:", error);
+      }
+      return;
+    }
+
+    // Handle replaceAll
+    if (edit.type === "replaceAll") {
+      try {
+        const tr = view.state.tr;
+        const docSize = view.state.doc.content.size;
+        if (edit.newContent.trim() === "") {
+          tr.delete(0, docSize);
+          tr.insert(0, schema.nodes.paragraph.create());
+        } else {
+          tr.replaceWith(0, docSize, parseMarkdownContent(edit.newContent));
+        }
+        view.dispatch(tr);
+        this.isEditorDirty = true;
+        this.updateIsDirty();
+        console.log("[AI Edit] ReplaceAll done");
+      } catch (error) {
+        console.error("[AI Edit] Error:", error);
+      }
+      return;
+    }
+
+    // For delete, replace, insert - we need to find the target
+    if (!edit.oldContent) {
+      console.log("[AI Edit] No oldContent provided");
+      return;
+    }
+
+    // Use the content as-is for matching - the AI should send exact content from the document
+    const searchText = edit.oldContent;
+
+    console.log("[AI Edit] Searching for:", searchText.substring(0, 100));
+
+    const match = findBestMatch(searchText, edit.contextBefore, edit.contextAfter);
+
+    if (!match) {
+      console.log("[AI Edit] No match found for:", searchText.substring(0, 50));
+      return;
+    }
+
+    // Apply the edit
+    try {
+      const tr = view.state.tr;
+
+      if (edit.type === "delete") {
+        tr.delete(match.from, match.to);
+        console.log("[AI Edit] Delete done");
+      } else if (edit.type === "replace") {
+        tr.replaceWith(match.from, match.to, parseMarkdownContent(edit.newContent));
+        console.log("[AI Edit] Replace done");
+      } else if (edit.type === "insert") {
+        tr.insert(match.to, parseMarkdownContent(edit.newContent));
+        console.log("[AI Edit] Insert done");
+      }
+
+      view.dispatch(tr);
+      this.isEditorDirty = true;
+      this.updateIsDirty();
+    } catch (error) {
+      console.error("[AI Edit] Error applying edit:", error);
+    }
+  };
 
   /**
    * Replaces the given selection with a template, if no selection is provided

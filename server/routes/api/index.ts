@@ -9,6 +9,7 @@ import requestTracer from "@server/middlewares/requestTracer";
 import { verifyCSRFToken } from "@server/middlewares/csrf";
 import { AppState, AppContext } from "@server/types";
 import { Hook, PluginManager } from "@server/utils/PluginManager";
+import ai from "./ai/ai";
 import apiKeys from "./apiKeys";
 import attachments from "./attachments";
 import auth from "./auth";
@@ -77,6 +78,7 @@ PluginManager.getHooks(Hook.API).forEach((hook) =>
 );
 
 // routes
+router.use("/", ai.routes());
 router.use("/", auth.routes());
 router.use("/", authenticationProviders.routes());
 router.use("/", events.routes());
