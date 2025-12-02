@@ -3,17 +3,26 @@ import { v4 as uuidv4 } from "uuid";
 import { client } from "~/utils/ApiClient";
 import type RootStore from "./RootStore";
 
+/**
+ * Represents an AI-generated edit to be applied to a document.
+ * Uses persistent blockId for reliable targeting across modifications.
+ */
 export interface DocumentEdit {
+  /** Unique identifier for this edit */
   id: string;
-  // Line-based edit (new system)
-  startLine?: number;
-  endLine?: number;
-  insert?: boolean;
-  // Legacy fields for display
-  type: "replace" | "insert" | "delete" | "prepend" | "append" | "replaceAll";
+  /** Persistent unique ID of the target block (stable across edits) */
+  blockId: string;
+  /** Current index of the block (informational, may change) */
+  blockIndex: number;
+  /** Original content of the block (captured when edit is created) */
+  originalContent: string;
+  /** New content to replace/insert (markdown format) */
+  replaceWith: string;
+  /** Action to perform: replace, delete, or insertAfter */
+  action: "replace" | "delete" | "insertAfter";
+  /** Human-readable description of the edit */
   description: string;
-  oldContent?: string;
-  newContent: string;
+  /** Current status of this edit */
   status: "pending" | "accepted" | "rejected";
 }
 
@@ -307,10 +316,14 @@ class AiChatStore {
   }
 
   @action
-  async sendMessage(content: string, documentContext?: string, mode: "ask" | "agent" = "ask") {
+  async sendMessage(
+    content: string,
+    documentContext?: string,
+    mode: "ask" | "agent" = "ask",
+    blocks?: Array<{ blockId: string; index: number; content: string; type: string; editable: boolean }>
+  ) {
     // Prevent duplicate sends
     if (this.isLoading) {
-      console.log("[AiChat] Already loading, ignoring duplicate send");
       return;
     }
 
@@ -328,6 +341,14 @@ class AiChatStore {
     };
 
     this.messages.push(loadingMessage);
+
+    // Store blocks for later use (blockId -> block info)
+    const blockMap = new Map(blocks?.map(b => [b.blockId, {
+      index: b.index,
+      content: b.content,
+      type: b.type,
+      editable: b.editable
+    }]) || []);
 
     try {
       // Build conversation history for context
@@ -359,51 +380,54 @@ class AiChatStore {
         if (index !== -1) {
           // Parse edits from response if in agent mode
           let edits: DocumentEdit[] | undefined;
-          if (mode === "agent" && response.data.edits) {
-            edits = response.data.edits.map((edit: {
-              startLine?: number;
-              endLine?: number;
-              insert?: boolean;
-              newContent?: string;
-              // Legacy fields
-              type?: string;
-              description?: string;
-              oldContent?: string;
-            }) => {
-              // Determine edit type based on new line-based format
-              let type: "replace" | "insert" | "delete" = "replace";
-              let description = "Edit";
+          if (mode === "agent" && response.data.edits && Array.isArray(response.data.edits)) {
+            edits = response.data.edits
+              .filter((edit: { blockId?: string; action?: string }) =>
+                typeof edit.blockId === 'string' && edit.blockId && edit.action
+              )
+              .map((edit: {
+                blockId: string;
+                replaceWith?: string;
+                action: string;
+                description?: string;
+              }) => {
+                const action = edit.action as "replace" | "delete" | "insertAfter";
+                const blockInfo = blockMap.get(edit.blockId);
+                const originalContent = blockInfo?.content || "";
+                const blockIndex = blockInfo?.index ?? -1;
+                const blockType = blockInfo?.type || "unknown";
 
-              if (edit.startLine !== undefined) {
-                // New line-based format
-                if (edit.insert) {
-                  type = "insert";
-                  description = `Insert at line ${edit.startLine}`;
-                } else if (!edit.newContent || edit.newContent === "") {
-                  type = "delete";
-                  description = `Delete lines ${edit.startLine}-${edit.endLine || edit.startLine}`;
+                let description: string;
+                if (edit.description) {
+                  description = edit.description;
                 } else {
-                  type = "replace";
-                  description = `Replace lines ${edit.startLine}-${edit.endLine || edit.startLine}`;
+                  // Truncate content for description
+                  const shortContent = originalContent.length > 30
+                    ? originalContent.substring(0, 30) + "..."
+                    : originalContent;
+                  switch (action) {
+                    case "delete":
+                      description = `Delete: "${shortContent}"`;
+                      break;
+                    case "insertAfter":
+                      description = `Insert after: "${shortContent}"`;
+                      break;
+                    default:
+                      description = `Replace: "${shortContent}"`;
+                  }
                 }
-              } else {
-                // Legacy format
-                type = (edit.type as "replace" | "insert" | "delete") || "replace";
-                description = edit.description || "Edit";
-              }
 
-              return {
-                id: uuidv4(),
-                startLine: edit.startLine,
-                endLine: edit.endLine,
-                insert: edit.insert,
-                type,
-                description,
-                oldContent: edit.oldContent,
-                newContent: edit.newContent || "",
-                status: "pending" as const,
-              };
-            });
+                return {
+                  id: uuidv4(),
+                  blockId: edit.blockId,
+                  blockIndex,
+                  originalContent,
+                  replaceWith: edit.replaceWith || "",
+                  action,
+                  description,
+                  status: "pending" as const,
+                };
+              });
           }
 
           this.messages[index] = {

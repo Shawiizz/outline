@@ -6,6 +6,7 @@ import { MarkSpec, NodeSpec, Schema } from "prosemirror-model";
 import { EditorView } from "prosemirror-view";
 import { Primitive } from "utility-types";
 import type { Editor } from "~/editor";
+import { shouldHaveBlockId } from "../extensions/BlockId";
 import Mark from "../marks/Mark";
 import Node from "../nodes/Node";
 import Extension, { CommandFactory } from "./Extension";
@@ -74,6 +75,18 @@ export default class ExtensionManager {
           .split(" ")
           .filter((m: string) => Object.keys(this.marks).includes(m))
           .join(" ");
+      }
+
+      // Inject blockId attribute into block-level nodes that should have persistent IDs.
+      // This enables AI agents to reliably target specific blocks for modifications.
+      if (shouldHaveBlockId(i)) {
+        const existingAttrs = nodes[i].attrs || {};
+        nodes[i].attrs = {
+          ...existingAttrs,
+          blockId: {
+            default: null,
+          },
+        };
       }
     }
 
@@ -186,10 +199,10 @@ export default class ExtensionManager {
       .map((extension) =>
         ["node", "mark"].includes(extension.type)
           ? extension.keys({
-              // @ts-expect-error TODO
-              type: schema[`${extension.type}s`][extension.name],
-              schema,
-            })
+            // @ts-expect-error TODO
+            type: schema[`${extension.type}s`][extension.name],
+            schema,
+          })
           : (extension as Extension).keys({ schema })
       );
 
@@ -231,9 +244,9 @@ export default class ExtensionManager {
           schema,
           ...(["node", "mark"].includes(type)
             ? {
-                // @ts-expect-error TODO
-                type: schema[`${type}s`][name],
-              }
+              // @ts-expect-error TODO
+              type: schema[`${type}s`][name],
+            }
             : {}),
         });
 

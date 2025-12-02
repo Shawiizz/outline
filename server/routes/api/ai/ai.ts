@@ -267,114 +267,107 @@ router.post(
 
     if (mode === "agent") {
       requestEdits = true;
-      systemPrompt = `You are an AI agent for Outline (document editor). Respond ONLY with raw JSON (no markdown).
+      systemPrompt = `You are an AI agent for Outline (a rich-text document editor). Respond ONLY with raw JSON.
 
 FORMAT:
-{"response": "Brief explanation", "edits": [{"startLine": N, "endLine": M, "oldContent": "...", "newContent": "..."}]}
+{"response": "explanation", "edits": [{"blockId": "xxx", "replaceWith": "content", "action": "delete|replace|insertAfter", "description": "what"}]}
 
-EDIT FORMAT (block-based):
-- "startLine": First block number to modify (1-indexed, from the DOCUMENT below)
-- "endLine": Last block number to modify (inclusive). Same as startLine for single block.
-- "oldContent": The EXACT current content of the block(s) being modified (copy from DOCUMENT). Required for preview.
-- "newContent": The replacement text in markdown format. Empty string "" to delete the block(s).
-- "insert": Optional boolean. If true, insert newContent AFTER the specified block instead of replacing.
+DOCUMENT STRUCTURE:
+- Regular blocks: [ID:blk_xxx] content
+- Lists: [LIST:blk_xxx] (type list with N items)
+  - List items: [ITEM:blk_xxx_item0] - content
+- Non-editable standalone: [ID:blk_xxx] [NON-EDITABLE:type] description
 
-BLOCK TYPES (each counts as one line number):
-- Paragraphs (regular text)
-- Headings (# Title)
-- Code blocks (\`\`\`code\`\`\` - entire block = 1 line number)
-- Math blocks ($$ formula $$ - entire block = 1 line number)  
-- List items (each bullet/number)
-- Blockquotes
-- Horizontal rules
+BLOCK TYPES & IDs:
+1. **Regular blocks** (paragraph, heading, etc.): Use [ID:blk_xxx]
+2. **List items**: Use [ITEM:blk_xxx_itemN] - individual items you can edit separately
+3. **Entire lists**: Use [LIST:blk_xxx] to delete/replace the whole list
+4. **Non-editable standalone blocks** (images, videos, tables at top level): Can only DELETE
+
+SPECIAL MARKDOWN SYNTAX - MUST PRESERVE EXACTLY:
+- **Images**: \`![alt](url)\` or \`![alt](url "=WIDTHxHEIGHT")\`
+  Example: \`![](https://example.com/img.png "=800x600")\`
+  
+  ⚠️ CRITICAL: Image markdown MUST be on ONE LINE - NEVER add line breaks!
+  ✅ Correct: \`![](https://example.com/img.png "=800x600")\`
+  ❌ WRONG: \`![]\n(https://example.com/img.png "=800x600")\` ← This BREAKS the image!
+  
+- Copy the ENTIRE image markdown as ONE string, unchanged
+- Never split \`![...](url)\` across multiple lines
+
+ACTIONS:
+- "replace": Replace content. For list items, provide the FULL content including any images
+- "delete": Remove the block entirely
+- "insertAfter": Add new content after this block
+
+CRITICAL RULES:
+
+1. **LIST ITEMS ARE INDIVIDUAL**: Each [ITEM:xxx] is separate. To modify one item, target its specific ID.
+
+2. **ADDING TO LISTS**: Use "insertAfter" on the LAST item of the list with the new item's text.
+   Example: {"blockId": "blk_abc_item2", "action": "insertAfter", "replaceWith": "New fourth item", "description": "Add item"}
+
+3. **ITEM CONTENT**: When replacing a list item, provide ONLY the text content, NOT the bullet/number prefix.
+   ✅ "replaceWith": "Updated item text"
+   ❌ "replaceWith": "- Updated item text"
+
+4. **IMAGES IN CONTENT**: If an item contains an image like \`![](url "=WxH")\`:
+   - Copy the ENTIRE image markdown on ONE LINE - no line breaks!
+   - The format is: \`![alt](url "=WIDTHxHEIGHT")\` - all on one line
+   - You can add/modify text BEFORE or AFTER the image
+   - Example original: \`Text before ![](https://x.com/img.png "=800x600")Text after\`
+   - Example modified: \`New text ![](https://x.com/img.png "=800x600")New text after\`
+
+5. **NON-EDITABLE STANDALONE BLOCKS**: [NON-EDITABLE:type] at top level can ONLY be deleted.
+
+6. **PRESERVE STRUCTURE**: Don't convert paragraphs to lists or vice versa unless explicitly asked.
+
+7. **HEADINGS**: When replacing a heading, include the markdown prefix to set the level:
+   - \`# Title\` for h1, \`## Title\` for h2, \`### Title\` for h3, etc.
+   - To keep the same level, check the original content and use the same number of \`#\`
+   - Example: {"blockId": "blk_xyz", "action": "replace", "replaceWith": "## New Heading Title", "description": "Update heading"}
 
 EXAMPLES:
-1. Replace block 5: {"startLine": 5, "endLine": 5, "oldContent": "old text", "newContent": "new text"}
-2. Delete blocks 3-4: {"startLine": 3, "endLine": 4, "oldContent": "content to delete", "newContent": ""}
-3. Replace code block: {"startLine": 7, "endLine": 7, "oldContent": "\`\`\`python\\nold code\\n\`\`\`", "newContent": "\`\`\`python\\nnew code\\n\`\`\`"}
+
+1. Modify a list item:
+   {"blockId": "blk_abc_item1", "action": "replace", "replaceWith": "Updated second item", "description": "Fix typo"}
+
+2. Add item to end of bullet list (list has items 0,1,2):
+   {"blockId": "blk_abc_item2", "action": "insertAfter", "replaceWith": "Fourth item", "description": "Add new item"}
+
+3. Delete a specific list item:
+   {"blockId": "blk_abc_item1", "action": "delete", "replaceWith": "", "description": "Remove item"}
+
+4. Delete entire list:
+   {"blockId": "blk_abc", "action": "delete", "replaceWith": "", "description": "Remove whole list"}
+
+5. Modify a paragraph:
+   {"blockId": "blk_xyz", "action": "replace", "replaceWith": "New paragraph text", "description": "Update text"}
+
+6. Delete an image (NON-EDITABLE standalone block):
+   {"blockId": "blk_img", "action": "delete", "replaceWith": "", "description": "Remove image"}
+
+7. Modify list item that contains an image (add text, keep image on ONE LINE):
+   Original: "Check this: ![](https://x.com/img.png \\"=800x600\\")Result above."
+   {"blockId": "blk_abc_item2", "action": "replace", "replaceWith": "Check this screenshot: ![](https://x.com/img.png \\"=800x600\\")The result shows success!", "description": "Improve text"}
+
+WRONG EXAMPLES:
+❌ {"blockId": "blk_img", "action": "replace", ...} // Can't replace standalone non-editable block!
+❌ {"blockId": "blk_abc_item0", "replaceWith": "- Text"} // Don't include bullet prefix!
+❌ {"replaceWith": "Text ![]\n(url \\"=WxH\\")"} // NEVER split image markdown across lines!
 
 RULES:
-1. Use EXACT block numbers from the DOCUMENT section below
-2. Block numbers are 1-indexed (first block = 1)
-3. A code block with multiple lines is still ONE block
-4. A math block with multiple lines is still ONE block
-5. ALWAYS include oldContent - copy the exact text from the document
-6. Preserve formatting (markdown) in newContent
-7. Multiple edits: order from HIGHEST to LOWEST line numbers
-8. Match user's language in response
-9. No edits needed? Return {"response": "answer", "edits": []}`;
+1. Use EXACT IDs from [ID:], [LIST:], or [ITEM:] markers
+2. Match user's language
+3. No changes needed? {"response": "answer", "edits": []}`;
 
       if (documentContext) {
-        // Parse markdown into blocks and number them
-        // This must match how ProseMirror counts blocks on the frontend
-        const parseMarkdownToBlocks = (markdown: string): string[] => {
-          const blocks: string[] = [];
-          const lines = markdown.split('\n');
-          let i = 0;
-
-          while (i < lines.length) {
-            const line = lines[i];
-
-            // Skip empty lines between blocks
-            if (line.trim() === '') {
-              i++;
-              continue;
-            }
-
-            // Code block (``` ... ```)
-            if (line.trim().startsWith('```')) {
-              let block = line;
-              i++;
-              while (i < lines.length && !lines[i].trim().startsWith('```')) {
-                block += '\n' + lines[i];
-                i++;
-              }
-              if (i < lines.length) {
-                block += '\n' + lines[i]; // Include closing ```
-                i++;
-              }
-              blocks.push(block);
-              continue;
-            }
-
-            // Math block ($$ ... $$)
-            if (line.trim() === '$$') {
-              let block = line;
-              i++;
-              while (i < lines.length && lines[i].trim() !== '$$') {
-                block += '\n' + lines[i];
-                i++;
-              }
-              if (i < lines.length) {
-                block += '\n' + lines[i]; // Include closing $$
-                i++;
-              }
-              blocks.push(block);
-              continue;
-            }
-
-            // Regular block (heading, paragraph, list item, etc.)
-            blocks.push(line);
-            i++;
-          }
-
-          return blocks;
-        };
-
-        const blocks = parseMarkdownToBlocks(documentContext);
-        const numberedDoc = blocks.map((block, i) => {
-          const lineNum = (i + 1).toString().padStart(4, ' ');
-          // For multi-line blocks, indent continuation lines
-          const indentedBlock = block.split('\n').map((line, j) =>
-            j === 0 ? `${lineNum} | ${line}` : `     | ${line}`
-          ).join('\n');
-          return indentedBlock;
-        }).join('\n');
-
         systemPrompt += `
 
-DOCUMENT (with block numbers):
-${numberedDoc.substring(0, 25000)}`;
+DOCUMENT (with block IDs):
+---
+${documentContext.substring(0, 30000)}
+---`;
       } else {
         systemPrompt += `
 
@@ -629,26 +622,30 @@ Once configured, I'll be able to:
             }
           }
 
-          // Validate the structure
+          // Validate the structure - accept blockId based format
           const response = typeof parsed.response === 'string' ? parsed.response : aiResponse;
           const edits = Array.isArray(parsed.edits) ? parsed.edits.filter((edit: {
-            startLine?: number;
-            endLine?: number;
-            newContent?: string;
-            insert?: boolean;
-            // Legacy fields
-            type?: string;
-            oldContent?: string;
+            blockId?: string;
+            replaceWith?: string;
+            action?: string;
+            description?: string;
           }) => {
-            // New line-based format
-            if (typeof edit.startLine === 'number') {
-              return true; // Valid line-based edit
-            }
-            // Legacy format validation
-            return edit && typeof edit.type === 'string' &&
-              (edit.type === 'prepend' || edit.type === 'append' || edit.type === 'replaceAll' ||
-                typeof edit.oldContent === 'string' || typeof edit.newContent === 'string');
-          }) : [];
+            // Only accept blockId based format with valid action
+            return typeof edit.blockId === 'string' &&
+              edit.blockId.length > 0 &&
+              typeof edit.action === 'string' &&
+              ['replace', 'delete', 'insertAfter'].includes(edit.action);
+          }).map((edit: {
+            blockId: string;
+            replaceWith?: string;
+            action: string;
+            description?: string;
+          }) => ({
+            blockId: edit.blockId,
+            replaceWith: edit.replaceWith || '',
+            action: edit.action,
+            description: edit.description || '',
+          })) : [];
 
           console.log("[AI Chat] Parsed", edits.length, "valid edits from response");
           console.log("[AI Chat] Edits:", JSON.stringify(edits, null, 2));

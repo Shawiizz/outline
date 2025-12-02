@@ -1,3 +1,4 @@
+import BlockId from "../extensions/BlockId";
 import DateTime from "../extensions/DateTime";
 import History from "../extensions/History";
 import MaxLength from "../extensions/MaxLength";
@@ -68,6 +69,7 @@ export const basicExtensions: Nodes = [
   MaxLength,
   DateTime,
   HardBreak,
+  BlockId,
 ];
 
 export const listExtensions: Nodes = [

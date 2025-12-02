@@ -1,6 +1,6 @@
 import MarkdownIt from "markdown-it";
 import { observer } from "mobx-react";
-import { CheckmarkIcon, CloseIcon, DocumentIcon, SparklesIcon, TrashIcon, RestoreIcon, SettingsIcon } from "outline-icons";
+import { CheckmarkIcon, CloseIcon, DocumentIcon, SparklesIcon, TrashIcon, RestoreIcon, SettingsIcon, CloudIcon } from "outline-icons";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -53,6 +53,8 @@ function AiChat() {
   const scrollableRef = React.useRef<HTMLDivElement | null>(null);
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const modelPickerRef = React.useRef<HTMLDivElement | null>(null);
+  const bottomRowRef = React.useRef<HTMLDivElement | null>(null);
+  const [isCompact, setIsCompact] = React.useState(false);
   const apiKeySettingsRef = React.useRef<HTMLDivElement | null>(null);
   const apiKeyButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
@@ -80,11 +82,11 @@ function AiChat() {
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      
+
       if (modelPickerRef.current && !modelPickerRef.current.contains(target)) {
         setShowModelPicker(false);
       }
-      
+
       // For API key settings, check both the dropdown and the button
       if (showApiKeySettings) {
         const isOutsideDropdown = apiKeySettingsRef.current && !apiKeySettingsRef.current.contains(target);
@@ -113,6 +115,32 @@ function AiChat() {
     void aiChat.loadModels();
   }, [aiChat]);
 
+  // Detect compact mode when container is too small
+  React.useEffect(() => {
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        // Switch to compact mode when width is less than 320px
+        setIsCompact(entry.contentRect.width < 320);
+      }
+    });
+
+    if (bottomRowRef.current) {
+      observer.observe(bottomRowRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Auto-resize textarea based on content
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
+
+    // Reset height to auto to get the correct scrollHeight
+    e.target.style.height = 'auto';
+    // Set height to scrollHeight, capped at max-height
+    const maxHeight = 120;
+    e.target.style.height = Math.min(e.target.scrollHeight, maxHeight) + 'px';
+  };
   // Get the last message content for auto-scroll dependency
   const lastMessage = aiChat.messages[aiChat.messages.length - 1];
   const lastMessageContent = lastMessage?.content;
@@ -137,20 +165,31 @@ function AiChat() {
     const message = inputValue.trim();
     setInputValue("");
 
-    // In agent mode, always send full document content as context
+    // In agent mode, always send full document content as context with block IDs
     // In ask mode, send context only if includeContext is enabled
     let documentContext: string | undefined;
+    let blocks: Array<{ blockId: string; index: number; content: string; type: string; editable: boolean }> | undefined;
+
     if (document) {
-      if (chatMode === "agent" || (chatMode === "ask" && includeContext)) {
-        // Get full document content as markdown
-        // Note: Don't include title as it's not part of the ProseMirror doc
-        // This ensures block numbers match between backend and frontend
+      if (chatMode === "agent") {
+        // Get document with persistent block IDs for precise AI editing
+        const result = ProsemirrorHelper.toBlocksWithIds(document);
+        documentContext = result.content;
+        blocks = result.blocks.map(b => ({
+          blockId: b.blockId,
+          index: b.index,
+          content: b.content,
+          type: b.type,
+          editable: b.editable
+        }));
+      } else if (chatMode === "ask" && includeContext) {
+        // For ask mode, use regular markdown
         const markdown = ProsemirrorHelper.toMarkdown(document);
         documentContext = markdown;
       }
     }
 
-    await aiChat.sendMessage(message, documentContext, chatMode);
+    await aiChat.sendMessage(message, documentContext, chatMode, blocks);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -175,10 +214,15 @@ function AiChat() {
     if (!document) return;
 
     // Dispatch a custom event that the editor can listen to
+    // Uses persistent blockId for reliable targeting
     const event = new CustomEvent("ai-apply-edit", {
       detail: {
         documentId: document.id,
-        edit,
+        edit: {
+          blockId: edit.blockId,
+          replaceWith: edit.replaceWith,
+          action: edit.action,
+        },
       },
     });
     window.dispatchEvent(event);
@@ -192,11 +236,10 @@ function AiChat() {
     aiChat.updateEditStatus(messageId, edit.id, "rejected");
   }, [aiChat]);
 
-  // Handle accepting all pending edits - sort by startLine descending to avoid position shifts
+  // Handle accepting all pending edits
+  // With persistent blockIds, order doesn't matter - each edit targets by ID not index
   const handleAcceptAllEdits = React.useCallback((messageId: string, edits: DocumentEdit[]) => {
-    const pendingEdits = edits
-      .filter(e => e.status === "pending")
-      .sort((a, b) => (b.startLine ?? 0) - (a.startLine ?? 0)); // Apply from bottom to top
+    const pendingEdits = edits.filter(e => e.status === "pending");
 
     for (const edit of pendingEdits) {
       handleAcceptEdit(messageId, edit);
@@ -317,34 +360,29 @@ function AiChat() {
                           </EditsHeader>
                           {message.edits.map((edit) => (
                             <EditCard key={edit.id} $status={edit.status}>
-                              <EditDescription>{edit.description}</EditDescription>
+                              <EditHeader>
+                                <EditAction $action={edit.action}>
+                                  {edit.action === "delete" && t("Delete")}
+                                  {edit.action === "insertAfter" && t("Insert")}
+                                  {edit.action === "replace" && t("Replace")}
+                                </EditAction>
+                                <BlockIdBadge title={edit.blockId}>
+                                  {edit.blockId.substring(0, 12)}...
+                                </BlockIdBadge>
+                              </EditHeader>
+                              <EditDescriptionFull>{edit.description}</EditDescriptionFull>
                               <DiffContainer>
-                                {edit.oldContent && (
-                                  <DiffLine $type="remove">
-                                    <DiffPrefix>-</DiffPrefix>
-                                    <DiffContent>
-                                      {edit.oldContent.length > 300
-                                        ? `${edit.oldContent.substring(0, 300)}...`
-                                        : edit.oldContent}
-                                    </DiffContent>
-                                  </DiffLine>
+                                {(edit.action === "delete" || edit.action === "replace") && edit.originalContent && (
+                                  <DiffSection $type="remove">
+                                    <DiffSectionHeader>{t("Will be removed")}</DiffSectionHeader>
+                                    <DiffContent>{edit.originalContent}</DiffContent>
+                                  </DiffSection>
                                 )}
-                                {edit.newContent && (
-                                  <DiffLine $type="add">
-                                    <DiffPrefix>+</DiffPrefix>
-                                    <DiffContent>
-                                      {edit.newContent.length > 300
-                                        ? `${edit.newContent.substring(0, 300)}...`
-                                        : edit.newContent}
-                                    </DiffContent>
-                                  </DiffLine>
-                                )}
-                                {/* Show deletion message only if no oldContent was provided */}
-                                {!edit.oldContent && !edit.newContent && edit.type === "delete" && (
-                                  <DiffLine $type="remove">
-                                    <DiffPrefix>-</DiffPrefix>
-                                    <DiffContent>{t("Section will be deleted")}</DiffContent>
-                                  </DiffLine>
+                                {(edit.action === "replace" || edit.action === "insertAfter") && edit.replaceWith && (
+                                  <DiffSection $type="add">
+                                    <DiffSectionHeader>{t("New content")}</DiffSectionHeader>
+                                    <DiffContent>{edit.replaceWith}</DiffContent>
+                                  </DiffSection>
                                 )}
                               </DiffContainer>
                               {edit.status === "pending" ? (
@@ -409,13 +447,13 @@ function AiChat() {
         <StyledTextarea
           ref={inputRef}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
+          onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
           placeholder={chatMode === "agent" ? t("Describe what you want the agent to do...") : t("Ask AI anything...")}
           disabled={aiChat.isLoading}
           rows={1}
         />
-        <BottomRow>
+        <BottomRow ref={bottomRowRef}>
           <LeftControls>
             {/* Mode Toggle */}
             <ModeToggle>
@@ -451,13 +489,22 @@ function AiChat() {
             {/* Model Picker */}
             {aiChat.providers.length > 0 && (
               <ModelPickerContainer ref={modelPickerRef}>
-                <ModelPickerButton
-                  type="button"
-                  onClick={() => setShowModelPicker(!showModelPicker)}
-                >
-                  <span>{currentModelName}</span>
-                  <DropdownArrow size={16} />
-                </ModelPickerButton>
+                <Tooltip content={currentModelName} placement="top" delay={300}>
+                  <ModelPickerButton
+                    type="button"
+                    onClick={() => setShowModelPicker(!showModelPicker)}
+                    $compact={isCompact}
+                  >
+                    {isCompact ? (
+                      <CloudIcon size={16} />
+                    ) : (
+                      <>
+                        <span>{currentModelName}</span>
+                        <DropdownArrow size={16} />
+                      </>
+                    )}
+                  </ModelPickerButton>
+                </Tooltip>
 
                 {showModelPicker && (
                   <ModelPickerDropdown>
@@ -498,95 +545,95 @@ function AiChat() {
 
   return (
     <>
-    <Sidebar
-      title={
-        <Flex align="center" justify="space-between" gap={8} auto>
-          <TitleWrapper>
-            <SparklesIcon size={20} />
-            <span>{t("AI Chat")}</span>
-          </TitleWrapper>
-          <Flex align="center" gap={4}>
-            {/* API Key Settings Button */}
-            <Tooltip content={t("API Key Settings")} placement="bottom">
-              <NudeButton 
-                ref={apiKeyButtonRef}
-                onClick={handleOpenApiKeySettings}
-              >
-                <SettingsIcon size={18} color={aiChat.hasClientApiKeys ? theme.accent : theme.textTertiary} />
-              </NudeButton>
-            </Tooltip>
-            {aiChat.hasMessages && (
-              <Tooltip content={t("Clear chat")} placement="bottom">
-                <NudeButton onClick={handleClearChat}>
-                  <TrashIcon size={18} color={theme.textTertiary} />
+      <Sidebar
+        title={
+          <Flex align="center" justify="space-between" gap={8} auto>
+            <TitleWrapper>
+              <SparklesIcon size={20} />
+              <span>{t("AI Chat")}</span>
+            </TitleWrapper>
+            <Flex align="center" gap={4}>
+              {/* API Key Settings Button */}
+              <Tooltip content={t("API Key Settings")} placement="bottom">
+                <NudeButton
+                  ref={apiKeyButtonRef}
+                  onClick={handleOpenApiKeySettings}
+                >
+                  <SettingsIcon size={18} color={aiChat.hasClientApiKeys ? theme.accent : theme.textTertiary} />
                 </NudeButton>
               </Tooltip>
-            )}
-          </Flex>
-        </Flex>
-      }
-      onClose={() => ui.set({ aiChatExpanded: false })}
-      scrollable={false}
-    >
-      {content}
-    </Sidebar>
-
-    {/* API Key Settings Dropdown - rendered as Portal to escape overflow:hidden */}
-    {showApiKeySettings && apiKeyDropdownPosition && ReactDOM.createPortal(
-      <ApiKeySettingsDropdown 
-        ref={apiKeySettingsRef}
-        style={{ 
-          top: apiKeyDropdownPosition.top, 
-          right: apiKeyDropdownPosition.right 
-        }}
-      >
-        <ApiKeySettingsTitle>{t("API Keys")}</ApiKeySettingsTitle>
-        <ApiKeyDescription>
-          {aiChat.serverHasKeys
-            ? t("Server has API keys configured. You can optionally use your own keys.")
-            : t("No server API keys configured. Add your own keys to use AI features.")}
-        </ApiKeyDescription>
-
-        {aiChat.availableProviders.length > 0 ? (
-          aiChat.availableProviders.map((provider) => (
-            <ApiKeyInputGroup key={provider.id}>
-              <ApiKeyLabel>{provider.name} API Key</ApiKeyLabel>
-              <ApiKeyInput
-                type="password"
-                placeholder={aiChat.clientApiKeys[provider.id] ? "••••••••" : t("Enter API key...")}
-                value={apiKeyInputs[provider.id] || ""}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
-                  setApiKeyInputs(prev => ({ ...prev, [provider.id]: e.target.value }))
-                }
-              />
-              {aiChat.clientApiKeys[provider.id] && (
-                <ApiKeyStatus>{t("Configured")}</ApiKeyStatus>
+              {aiChat.hasMessages && (
+                <Tooltip content={t("Clear chat")} placement="bottom">
+                  <NudeButton onClick={handleClearChat}>
+                    <TrashIcon size={18} color={theme.textTertiary} />
+                  </NudeButton>
+                </Tooltip>
               )}
-            </ApiKeyInputGroup>
-          ))
-        ) : (
-          <ApiKeyDescription>
-            {t("Loading providers...")}
-          </ApiKeyDescription>
-        )}
+            </Flex>
+          </Flex>
+        }
+        onClose={() => ui.set({ aiChatExpanded: false })}
+        scrollable={false}
+      >
+        {content}
+      </Sidebar>
 
-        <ApiKeyActions>
-          <ButtonSmall
-            onClick={handleSaveApiKeys}
-            disabled={!hasApiKeyInput}
-          >
-            {t("Save")}
-          </ButtonSmall>
-          {aiChat.hasClientApiKeys && (
-            <ButtonSmall onClick={handleClearApiKeys} neutral>
-              {t("Clear Keys")}
-            </ButtonSmall>
+      {/* API Key Settings Dropdown - rendered as Portal to escape overflow:hidden */}
+      {showApiKeySettings && apiKeyDropdownPosition && ReactDOM.createPortal(
+        <ApiKeySettingsDropdown
+          ref={apiKeySettingsRef}
+          style={{
+            top: apiKeyDropdownPosition.top,
+            right: apiKeyDropdownPosition.right
+          }}
+        >
+          <ApiKeySettingsTitle>{t("API Keys")}</ApiKeySettingsTitle>
+          <ApiKeyDescription>
+            {aiChat.serverHasKeys
+              ? t("Server has API keys configured. You can optionally use your own keys.")
+              : t("No server API keys configured. Add your own keys to use AI features.")}
+          </ApiKeyDescription>
+
+          {aiChat.availableProviders.length > 0 ? (
+            aiChat.availableProviders.map((provider) => (
+              <ApiKeyInputGroup key={provider.id}>
+                <ApiKeyLabel>{provider.name} API Key</ApiKeyLabel>
+                <ApiKeyInput
+                  type="password"
+                  placeholder={aiChat.clientApiKeys[provider.id] ? "••••••••" : t("Enter API key...")}
+                  value={apiKeyInputs[provider.id] || ""}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setApiKeyInputs(prev => ({ ...prev, [provider.id]: e.target.value }))
+                  }
+                />
+                {aiChat.clientApiKeys[provider.id] && (
+                  <ApiKeyStatus>{t("Configured")}</ApiKeyStatus>
+                )}
+              </ApiKeyInputGroup>
+            ))
+          ) : (
+            <ApiKeyDescription>
+              {t("Loading providers...")}
+            </ApiKeyDescription>
           )}
-        </ApiKeyActions>
-      </ApiKeySettingsDropdown>,
-      window.document.body
-    )}
-  </>
+
+          <ApiKeyActions>
+            <ButtonSmall
+              onClick={handleSaveApiKeys}
+              disabled={!hasApiKeyInput}
+            >
+              {t("Save")}
+            </ButtonSmall>
+            {aiChat.hasClientApiKeys && (
+              <ButtonSmall onClick={handleClearApiKeys} neutral>
+                {t("Clear Keys")}
+              </ButtonSmall>
+            )}
+          </ApiKeyActions>
+        </ApiKeySettingsDropdown>,
+        window.document.body
+      )}
+    </>
   );
 }
 
@@ -850,14 +897,16 @@ const BottomRow = styled.div`
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: nowrap;
 `;
 
 const LeftControls = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 `;
 
 const ModeToggle = styled.div`
@@ -904,13 +953,15 @@ const ContextToggleButton = styled.button<{ $active: boolean }>`
 
 const ModelPickerContainer = styled.div`
   position: relative;
+  flex-shrink: 0;
 `;
 
-const ModelPickerButton = styled.button`
+const ModelPickerButton = styled.button<{ $compact?: boolean }>`
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: ${(props) => props.$compact ? "4px 6px" : "4px 8px"};
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -918,7 +969,8 @@ const ModelPickerButton = styled.button`
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
-  max-width: 150px;
+  max-width: ${(props) => props.$compact ? "32px" : "150px"};
+  min-width: ${(props) => props.$compact ? "32px" : "auto"};
 
   span {
     overflow: hidden;
@@ -1064,43 +1116,92 @@ const EditCard = styled.div<{ $status: "pending" | "accepted" | "rejected" }>`
   }
 `;
 
-const EditDescription = styled.div`
-  font-size: 12px;
-  color: ${s("textSecondary")};
+const EditDescriptionFull = styled.div`
+  font-size: 13px;
+  color: ${s("text")};
   margin-bottom: 8px;
+  line-height: 1.4;
+`;
+
+const EditHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+`;
+
+const EditAction = styled.span<{ $action: "replace" | "delete" | "insertAfter" }>`
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: ${(props) =>
+    props.$action === "delete"
+      ? props.theme.danger + "20"
+      : props.$action === "insertAfter"
+        ? props.theme.brand.green + "20"
+        : props.theme.accent + "20"};
+  color: ${(props) =>
+    props.$action === "delete"
+      ? props.theme.danger
+      : props.$action === "insertAfter"
+        ? props.theme.brand.green
+        : props.theme.accent};
+`;
+
+const BlockIdBadge = styled.span`
+  font-size: 9px;
+  font-weight: 600;
+  font-family: monospace;
+  letter-spacing: 0.5px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: ${s("textTertiary")}20;
+  color: ${s("textTertiary")};
+  cursor: help;
 `;
 
 const DiffContainer = styled.div`
-  background: ${s("codeBackground")};
-  border-radius: 6px;
-  padding: 8px;
-  font-family: monospace;
-  font-size: 12px;
-  overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 8px;
 `;
 
-const DiffLine = styled.div<{ $type: "add" | "remove" }>`
-  display: flex;
+const DiffSection = styled.div<{ $type: "add" | "remove" }>`
   background: ${(props) =>
     props.$type === "add"
-      ? props.theme.brand.green + "15"
-      : props.theme.danger + "15"};
-  padding: 2px 4px;
-  border-radius: 2px;
-  margin: 2px 0;
+      ? props.theme.brand.green + "12"
+      : props.theme.danger + "12"};
+  border-left: 3px solid ${(props) =>
+    props.$type === "add"
+      ? props.theme.brand.green
+      : props.theme.danger};
+  border-radius: 4px;
+  overflow: hidden;
 `;
 
-const DiffPrefix = styled.span`
-  width: 16px;
-  flex-shrink: 0;
-  color: ${s("textTertiary")};
-  user-select: none;
+const DiffSectionHeader = styled.div`
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.1);
+  color: ${s("textSecondary")};
 `;
 
-const DiffContent = styled.span`
+const DiffContent = styled.div`
+  padding: 8px 12px;
+  font-family: ${s("fontFamilyMono")};
+  font-size: 12px;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
 `;
 
 const EditActions = styled.div`
