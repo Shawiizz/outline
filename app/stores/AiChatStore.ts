@@ -37,8 +37,14 @@ export interface AiProvider {
   models: AiModel[];
 }
 
+export interface AvailableProvider {
+  id: string;
+  name: string;
+}
+
 const AI_CHAT_STORAGE_KEY = "AI_CHAT_MESSAGES";
 const AI_CHAT_SETTINGS_KEY = "AI_CHAT_SETTINGS";
+const AI_CHAT_API_KEYS_KEY = "AI_CHAT_API_KEYS";
 
 class AiChatStore {
   @observable
@@ -54,6 +60,9 @@ class AiChatStore {
   providers: AiProvider[] = [];
 
   @observable
+  availableProviders: AvailableProvider[] = [];
+
+  @observable
   selectedProvider: string | null = null;
 
   @observable
@@ -65,12 +74,19 @@ class AiChatStore {
   @observable
   lastRequest: { content: string; documentContext?: string; mode: "ask" | "agent" } | null = null;
 
+  @observable
+  clientApiKeys: Record<string, string> = {};
+
+  @observable
+  serverHasKeys = false;
+
   rootStore: RootStore;
 
   constructor(rootStore: RootStore) {
     this.rootStore = rootStore;
     this.loadFromStorage();
     this.loadSettings();
+    this.loadApiKeys();
   }
 
   private loadFromStorage() {
@@ -136,6 +152,39 @@ class AiChatStore {
     }
   }
 
+  private loadApiKeys() {
+    try {
+      const stored = localStorage.getItem(AI_CHAT_API_KEYS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        this.clientApiKeys = parsed || {};
+      }
+    } catch (e) {
+      console.error("Failed to load AI API keys from storage", e);
+    }
+  }
+
+  private saveApiKeys() {
+    try {
+      localStorage.setItem(
+        AI_CHAT_API_KEYS_KEY,
+        JSON.stringify(this.clientApiKeys)
+      );
+    } catch (e) {
+      console.error("Failed to save AI API keys to storage", e);
+    }
+  }
+
+  @computed
+  get hasClientApiKeys() {
+    return Object.values(this.clientApiKeys).some(key => !!key);
+  }
+
+  @computed
+  get needsApiKeyConfiguration() {
+    return !this.serverHasKeys && !this.hasClientApiKeys;
+  }
+
   @computed
   get hasMessages() {
     return this.messages.length > 0;
@@ -168,13 +217,50 @@ class AiChatStore {
   }
 
   @action
+  setClientApiKey(providerId: string, key: string | null) {
+    if (key) {
+      this.clientApiKeys[providerId] = key;
+    } else {
+      delete this.clientApiKeys[providerId];
+    }
+    this.saveApiKeys();
+    // Reload models to update available providers
+    this.modelsLoaded = false;
+    void this.loadModels();
+  }
+
+  @action
+  clearClientApiKeys() {
+    this.clientApiKeys = {};
+    this.saveApiKeys();
+    // Reload models to update available providers
+    this.modelsLoaded = false;
+    void this.loadModels();
+  }
+
+  // Legacy methods for backward compatibility
+  @action
+  setClientOpenAIKey(key: string | null) {
+    this.setClientApiKey("openai", key);
+  }
+
+  @action
+  setClientGeminiKey(key: string | null) {
+    this.setClientApiKey("gemini", key);
+  }
+
+  @action
   async loadModels() {
     if (this.modelsLoaded) return;
 
     try {
-      const response = await client.post("/ai.models", {}, { retry: false });
+      const response = await client.post("/ai.models", {
+        clientApiKeys: Object.keys(this.clientApiKeys).length > 0 ? this.clientApiKeys : undefined,
+      }, { retry: false });
       runInAction(() => {
         this.providers = response.data.providers;
+        this.availableProviders = response.data.availableProviders || [];
+        this.serverHasKeys = response.data.serverHasKeys || false;
         if (!this.selectedProvider && response.data.defaultProvider) {
           this.selectedProvider = response.data.defaultProvider;
         }
@@ -253,6 +339,11 @@ class AiChatStore {
           content: m.content,
         }));
 
+      // Get the appropriate client API key for the selected provider
+      const clientApiKey = this.selectedProvider
+        ? this.clientApiKeys[this.selectedProvider]
+        : undefined;
+
       const response = await client.post("/ai.chat", {
         message: content,
         documentContext,
@@ -260,6 +351,7 @@ class AiChatStore {
         provider: this.selectedProvider,
         model: this.selectedModel,
         mode,
+        clientApiKey: clientApiKey || undefined,
       }, { retry: false, timeout: 180000 }); // 3 minute timeout for AI requests
 
       runInAction(() => {

@@ -1,7 +1,8 @@
 import MarkdownIt from "markdown-it";
 import { observer } from "mobx-react";
-import { CheckmarkIcon, CloseIcon, DocumentIcon, SparklesIcon, TrashIcon, RestoreIcon } from "outline-icons";
+import { CheckmarkIcon, CloseIcon, DocumentIcon, SparklesIcon, TrashIcon, RestoreIcon, SettingsIcon } from "outline-icons";
 import * as React from "react";
+import * as ReactDOM from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useRouteMatch } from "react-router-dom";
 import styled, { useTheme } from "styled-components";
@@ -46,9 +47,14 @@ function AiChat() {
   const [includeContext, setIncludeContext] = React.useState(() => {
     return localStorage.getItem("AI_CHAT_INCLUDE_CONTEXT") === "true";
   });
+  const [showApiKeySettings, setShowApiKeySettings] = React.useState(false);
+  const [apiKeyDropdownPosition, setApiKeyDropdownPosition] = React.useState<{ top: number; right: number } | null>(null);
+  const [apiKeyInputs, setApiKeyInputs] = React.useState<Record<string, string>>({});
   const scrollableRef = React.useRef<HTMLDivElement | null>(null);
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const modelPickerRef = React.useRef<HTMLDivElement | null>(null);
+  const apiKeySettingsRef = React.useRef<HTMLDivElement | null>(null);
+  const apiKeyButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
   // Save chat mode to localStorage when it changes
   React.useEffect(() => {
@@ -61,7 +67,9 @@ function AiChat() {
   }, [includeContext]);
 
   useKeyDown("Escape", () => {
-    if (showModelPicker) {
+    if (showApiKeySettings) {
+      setShowApiKeySettings(false);
+    } else if (showModelPicker) {
       setShowModelPicker(false);
     } else {
       ui.set({ aiChatExpanded: false });
@@ -71,17 +79,34 @@ function AiChat() {
   // Close model picker when clicking outside
   React.useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (modelPickerRef.current && !modelPickerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      
+      if (modelPickerRef.current && !modelPickerRef.current.contains(target)) {
         setShowModelPicker(false);
+      }
+      
+      // For API key settings, check both the dropdown and the button
+      if (showApiKeySettings) {
+        const isOutsideDropdown = apiKeySettingsRef.current && !apiKeySettingsRef.current.contains(target);
+        const isOutsideButton = apiKeyButtonRef.current && !apiKeyButtonRef.current.contains(target);
+        if (isOutsideDropdown && isOutsideButton) {
+          setShowApiKeySettings(false);
+        }
       }
     };
 
-    if (showModelPicker) {
-      window.addEventListener("mousedown", handleClickOutside);
-      return () => window.removeEventListener("mousedown", handleClickOutside);
+    if (showModelPicker || showApiKeySettings) {
+      // Use setTimeout to avoid the click that opened the dropdown from immediately closing it
+      const timeoutId = setTimeout(() => {
+        window.addEventListener("mousedown", handleClickOutside);
+      }, 0);
+      return () => {
+        clearTimeout(timeoutId);
+        window.removeEventListener("mousedown", handleClickOutside);
+      };
     }
     return undefined;
-  }, [showModelPicker]);
+  }, [showModelPicker, showApiKeySettings]);
 
   // Load available models on mount
   React.useEffect(() => {
@@ -185,6 +210,40 @@ function AiChat() {
       handleRejectEdit(messageId, edit);
     }
   }, [handleRejectEdit]);
+
+  // Handle saving API keys
+  const handleSaveApiKeys = React.useCallback(() => {
+    for (const [providerId, key] of Object.entries(apiKeyInputs)) {
+      if (key.trim()) {
+        aiChat.setClientApiKey(providerId, key.trim());
+      }
+    }
+    setApiKeyInputs({});
+    setShowApiKeySettings(false);
+  }, [apiKeyInputs, aiChat]);
+
+  // Handle clearing API keys
+  const handleClearApiKeys = React.useCallback(() => {
+    aiChat.clearClientApiKeys();
+    setApiKeyInputs({});
+  }, [aiChat]);
+
+  // Check if any API key input has value
+  const hasApiKeyInput = React.useMemo(() => {
+    return Object.values(apiKeyInputs).some(key => key.trim());
+  }, [apiKeyInputs]);
+
+  // Handle opening API key settings dropdown
+  const handleOpenApiKeySettings = React.useCallback(() => {
+    if (apiKeyButtonRef.current) {
+      const rect = apiKeyButtonRef.current.getBoundingClientRect();
+      setApiKeyDropdownPosition({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setShowApiKeySettings(true);
+  }, []);
 
   // Get current model display name
   const currentModelName = React.useMemo(() => {
@@ -438,6 +497,7 @@ function AiChat() {
   );
 
   return (
+    <>
     <Sidebar
       title={
         <Flex align="center" justify="space-between" gap={8} auto>
@@ -445,13 +505,24 @@ function AiChat() {
             <SparklesIcon size={20} />
             <span>{t("AI Chat")}</span>
           </TitleWrapper>
-          {aiChat.hasMessages && (
-            <Tooltip content={t("Clear chat")} placement="bottom">
-              <NudeButton onClick={handleClearChat}>
-                <TrashIcon size={18} color={theme.textTertiary} />
+          <Flex align="center" gap={4}>
+            {/* API Key Settings Button */}
+            <Tooltip content={t("API Key Settings")} placement="bottom">
+              <NudeButton 
+                ref={apiKeyButtonRef}
+                onClick={handleOpenApiKeySettings}
+              >
+                <SettingsIcon size={18} color={aiChat.hasClientApiKeys ? theme.accent : theme.textTertiary} />
               </NudeButton>
             </Tooltip>
-          )}
+            {aiChat.hasMessages && (
+              <Tooltip content={t("Clear chat")} placement="bottom">
+                <NudeButton onClick={handleClearChat}>
+                  <TrashIcon size={18} color={theme.textTertiary} />
+                </NudeButton>
+              </Tooltip>
+            )}
+          </Flex>
         </Flex>
       }
       onClose={() => ui.set({ aiChatExpanded: false })}
@@ -459,6 +530,63 @@ function AiChat() {
     >
       {content}
     </Sidebar>
+
+    {/* API Key Settings Dropdown - rendered as Portal to escape overflow:hidden */}
+    {showApiKeySettings && apiKeyDropdownPosition && ReactDOM.createPortal(
+      <ApiKeySettingsDropdown 
+        ref={apiKeySettingsRef}
+        style={{ 
+          top: apiKeyDropdownPosition.top, 
+          right: apiKeyDropdownPosition.right 
+        }}
+      >
+        <ApiKeySettingsTitle>{t("API Keys")}</ApiKeySettingsTitle>
+        <ApiKeyDescription>
+          {aiChat.serverHasKeys
+            ? t("Server has API keys configured. You can optionally use your own keys.")
+            : t("No server API keys configured. Add your own keys to use AI features.")}
+        </ApiKeyDescription>
+
+        {aiChat.availableProviders.length > 0 ? (
+          aiChat.availableProviders.map((provider) => (
+            <ApiKeyInputGroup key={provider.id}>
+              <ApiKeyLabel>{provider.name} API Key</ApiKeyLabel>
+              <ApiKeyInput
+                type="password"
+                placeholder={aiChat.clientApiKeys[provider.id] ? "••••••••" : t("Enter API key...")}
+                value={apiKeyInputs[provider.id] || ""}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
+                  setApiKeyInputs(prev => ({ ...prev, [provider.id]: e.target.value }))
+                }
+              />
+              {aiChat.clientApiKeys[provider.id] && (
+                <ApiKeyStatus>{t("Configured")}</ApiKeyStatus>
+              )}
+            </ApiKeyInputGroup>
+          ))
+        ) : (
+          <ApiKeyDescription>
+            {t("Loading providers...")}
+          </ApiKeyDescription>
+        )}
+
+        <ApiKeyActions>
+          <ButtonSmall
+            onClick={handleSaveApiKeys}
+            disabled={!hasApiKeyInput}
+          >
+            {t("Save")}
+          </ButtonSmall>
+          {aiChat.hasClientApiKeys && (
+            <ButtonSmall onClick={handleClearApiKeys} neutral>
+              {t("Clear Keys")}
+            </ButtonSmall>
+          )}
+        </ApiKeyActions>
+      </ApiKeySettingsDropdown>,
+      window.document.body
+    )}
+  </>
   );
 }
 
@@ -1011,6 +1139,83 @@ const EditStatus = styled.div<{ $status: "accepted" | "rejected" }>`
       : props.theme.danger};
   text-transform: uppercase;
   letter-spacing: 0.5px;
+`;
+
+// API Key Settings styles
+const ApiKeySettingsContainer = styled.div`
+  position: relative;
+  display: flex;
+  align-items: center;
+`;
+
+const ApiKeySettingsDropdown = styled.div`
+  position: fixed;
+  width: 300px;
+  background: ${s("menuBackground")};
+  border: 1px solid ${s("inputBorder")};
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 9999;
+  padding: 16px;
+`;
+
+const ApiKeySettingsTitle = styled.div`
+  font-size: 14px;
+  font-weight: 600;
+  color: ${s("text")};
+  margin-bottom: 8px;
+`;
+
+const ApiKeyDescription = styled.div`
+  font-size: 12px;
+  color: ${s("textSecondary")};
+  margin-bottom: 16px;
+  line-height: 1.4;
+`;
+
+const ApiKeyInputGroup = styled.div`
+  margin-bottom: 12px;
+`;
+
+const ApiKeyLabel = styled.label`
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: ${s("textSecondary")};
+  margin-bottom: 4px;
+`;
+
+const ApiKeyInput = styled.input`
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid ${s("inputBorder")};
+  border-radius: 6px;
+  background: ${s("background")};
+  color: ${s("text")};
+  font-size: 13px;
+  font-family: monospace;
+  outline: none;
+  transition: border-color 0.2s;
+
+  &:focus {
+    border-color: ${s("accent")};
+  }
+
+  &::placeholder {
+    color: ${s("textTertiary")};
+  }
+`;
+
+const ApiKeyStatus = styled.div`
+  font-size: 11px;
+  color: ${s("accent")};
+  margin-top: 4px;
+`;
+
+const ApiKeyActions = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
 `;
 
 export default observer(AiChat);

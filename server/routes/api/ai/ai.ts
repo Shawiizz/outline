@@ -31,34 +31,60 @@ interface GeminiResponse {
   }>;
 }
 
-// Available models configuration
-const AVAILABLE_MODELS = {
-  openai: [
-    { id: "gpt-4o", name: "GPT-4o" },
-    { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-    { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
-    { id: "gpt-4", name: "GPT-4" },
-    { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
-  ],
-  gemini: [
-    { id: "gemini-3-pro", name: "Gemini 3 Pro" },
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-    { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite" },
-    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
-  ],
+// Provider configuration with models, display names and server env keys
+const PROVIDERS: Record<string, {
+  name: string;
+  envKey: keyof typeof env;
+  defaultModel: string;
+  models: Array<{ id: string; name: string }>;
+}> = {
+  openai: {
+    name: "OpenAI",
+    envKey: "OPENAI_API_KEY",
+    defaultModel: "gpt-3.5-turbo",
+    models: [
+      { id: "gpt-4o", name: "GPT-4o" },
+      { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+      { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
+      { id: "gpt-4", name: "GPT-4" },
+      { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
+    ],
+  },
+  gemini: {
+    name: "Google Gemini",
+    envKey: "GEMINI_API_KEY",
+    defaultModel: "gemini-2.5-flash",
+    models: [
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+      { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite" },
+      { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
+    ],
+  },
 };
+
+// Helper to get API key for a provider (server or client)
+function getApiKeyForProvider(providerId: string, clientApiKey?: string): string | undefined {
+  const config = PROVIDERS[providerId];
+  if (!config) return undefined;
+  return (env[config.envKey] as string | undefined) || clientApiKey;
+}
 
 async function callOpenAI(
   messages: Array<{ role: string; content: string }>,
   model: string,
-  jsonMode = false
+  jsonMode = false,
+  apiKey?: string
 ): Promise<string> {
+  const key = apiKey || env.OPENAI_API_KEY;
+  if (!key) {
+    throw new Error("OpenAI API key not configured");
+  }
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
       model,
@@ -104,8 +130,13 @@ async function callOpenAI(
 async function callGemini(
   messages: Array<{ role: string; content: string }>,
   model: string,
-  jsonMode = false
+  jsonMode = false,
+  apiKey?: string
 ): Promise<string> {
+  const key = apiKey || env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("Gemini API key not configured");
+  }
   // Convert messages to Gemini format
   const contents = messages
     .filter((m) => m.role !== "system")
@@ -126,7 +157,7 @@ async function callGemini(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": env.GEMINI_API_KEY || "",
+        "x-goog-api-key": key,
       },
       body: JSON.stringify({
         contents,
@@ -198,12 +229,24 @@ router.post(
       ctx.req.socket.setTimeout(3 * 60 * 1000); // 3 minutes
     }
 
-    const { message, documentContext, history, provider, model, mode } = ctx.input.body;
+    const { message, documentContext, history, provider, model, mode, clientApiKey } = ctx.input.body;
 
     console.log("[AI Chat] Request received, documentContext length:", documentContext?.length || 0);
 
-    // Determine which provider to use
-    const selectedProvider = provider || (env.GEMINI_API_KEY ? "gemini" : "openai");
+    // Determine which provider to use and get API key
+    const availableProviders = Object.keys(PROVIDERS).filter(pid => {
+      const key = getApiKeyForProvider(pid, pid === provider ? clientApiKey : undefined);
+      return !!key;
+    });
+
+    const selectedProvider = provider && availableProviders.includes(provider)
+      ? provider
+      : availableProviders[0] || null;
+
+    // Get the API key for the selected provider
+    const activeApiKey = selectedProvider
+      ? getApiKeyForProvider(selectedProvider, clientApiKey)
+      : undefined;
 
     // Determine which model to use
     let selectedModel = model;
@@ -370,21 +413,23 @@ Be concise, helpful, and friendly. Format your responses using markdown when app
 
     try {
       // Check for API keys
-      const hasOpenAI = !!env.OPENAI_API_KEY;
-      const hasGemini = !!env.GEMINI_API_KEY;
+      const hasProvider = !!selectedProvider && !!activeApiKey;
 
       console.log("[AI Chat] Provider requested:", provider, "| Selected:", selectedProvider);
       console.log("[AI Chat] Model:", selectedModel);
-      console.log("[AI Chat] Has OpenAI:", hasOpenAI, "| Has Gemini:", hasGemini);
+      console.log("[AI Chat] Has active provider:", hasProvider);
+      console.log("[AI Chat] Using client API key:", !!clientApiKey);
 
-      if (!hasOpenAI && !hasGemini) {
+      if (!hasProvider) {
         ctx.body = {
           data: {
-            response: `I'm an AI assistant placeholder. To enable full AI capabilities, please configure one of these environment variables:
-- OPENAI_API_KEY for OpenAI/ChatGPT
-- GEMINI_API_KEY for Google Gemini
+            response: `No AI provider configured. You can either:
 
-Your message was: "${message}"
+1. **Use your own API key**: Click the ⚙️ icon in the chat to add your OpenAI or Gemini API key.
+
+2. **Server configuration**: Ask your administrator to set one of these environment variables:
+   - OPENAI_API_KEY for OpenAI/ChatGPT
+   - GEMINI_API_KEY for Google Gemini
 
 Once configured, I'll be able to:
 - Answer questions about your documents
@@ -398,14 +443,12 @@ Once configured, I'll be able to:
 
       let aiResponse: string;
 
-      if (selectedProvider === "gemini" && hasGemini) {
-        aiResponse = await callGemini(messages, selectedModel, requestEdits);
-      } else if (selectedProvider === "openai" && hasOpenAI) {
-        aiResponse = await callOpenAI(messages, selectedModel, requestEdits);
-      } else if (hasGemini) {
-        aiResponse = await callGemini(messages, env.GEMINI_MODEL || "gemini-2.5-flash", requestEdits);
+      if (selectedProvider === "gemini") {
+        aiResponse = await callGemini(messages, selectedModel, requestEdits, activeApiKey);
+      } else if (selectedProvider === "openai") {
+        aiResponse = await callOpenAI(messages, selectedModel, requestEdits, activeApiKey);
       } else {
-        aiResponse = await callOpenAI(messages, env.OPENAI_MODEL || "gpt-3.5-turbo", requestEdits);
+        throw new Error("No valid AI provider available");
       }
 
       // Parse response for agent mode (edits)
@@ -651,41 +694,54 @@ Once configured, I'll be able to:
 router.post(
   "ai.models",
   auth(),
-  async (ctx) => {
-    const hasOpenAI = !!env.OPENAI_API_KEY;
-    const hasGemini = !!env.GEMINI_API_KEY;
+  validate(T.AiModelsSchema),
+  async (ctx: APIContext<T.AiModelsReq>) => {
+    const { clientApiKeys } = ctx.input.body;
 
+    // Build providers list based on available keys (server or client)
     const providers: Array<{
       id: string;
       name: string;
       models: Array<{ id: string; name: string }>;
     }> = [];
 
-    if (hasOpenAI) {
-      providers.push({
-        id: "openai",
-        name: "OpenAI",
-        models: AVAILABLE_MODELS.openai,
-      });
+    let serverHasKeys = false;
+
+    for (const [providerId, config] of Object.entries(PROVIDERS)) {
+      const serverKey = env[config.envKey] as string | undefined;
+      const clientKey = clientApiKeys?.[providerId];
+      const hasKey = !!serverKey || !!clientKey;
+
+      if (serverKey) {
+        serverHasKeys = true;
+      }
+
+      if (hasKey) {
+        providers.push({
+          id: providerId,
+          name: config.name,
+          models: config.models,
+        });
+      }
     }
 
-    if (hasGemini) {
-      providers.push({
-        id: "gemini",
-        name: "Google Gemini",
-        models: AVAILABLE_MODELS.gemini,
-      });
-    }
+    // Determine defaults
+    const defaultProviderId = providers.length > 0 ? providers[0].id : null;
+    const defaultModel = defaultProviderId
+      ? PROVIDERS[defaultProviderId]?.defaultModel || providers[0]?.models[0]?.id
+      : null;
 
     ctx.body = {
       data: {
         providers,
-        defaultProvider: hasGemini ? "gemini" : hasOpenAI ? "openai" : null,
-        defaultModel: hasGemini
-          ? env.GEMINI_MODEL || "gemini-2.5-flash"
-          : hasOpenAI
-            ? env.OPENAI_MODEL || "gpt-3.5-turbo"
-            : null,
+        // Send all provider configs so client knows what's available
+        availableProviders: Object.entries(PROVIDERS).map(([id, config]) => ({
+          id,
+          name: config.name,
+        })),
+        defaultProvider: defaultProviderId,
+        defaultModel,
+        serverHasKeys,
       },
     };
   }
