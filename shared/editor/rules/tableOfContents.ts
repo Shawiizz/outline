@@ -36,6 +36,6 @@ export default (md: Parameters<PluginSimple>[0]) => {
 
     // Render the token
     md.renderer.rules.table_of_contents = () => {
-        return '<div class="table-of-contents-block" data-max-level="3"></div>';
+        return '<div class="table-of-contents-block" data-max-level="4"></div>';
     };
 };

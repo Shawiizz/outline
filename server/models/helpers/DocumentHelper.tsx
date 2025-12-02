@@ -262,10 +262,8 @@ export class DocumentHelper {
     const allHeadings = doc.querySelectorAll("h1, h2, h3, h4, h5, h6");
 
     tocPlaceholders.forEach((placeholder) => {
-      const maxLevel = parseInt(
-        (placeholder as HTMLElement).dataset.maxLevel || "3",
-        10
-      );
+      // Always use maxLevel 4 to include h4 headings, regardless of stored value
+      const maxLevel = 4;
 
       // Build the TOC HTML
       const tocHTML = DocumentHelper.generateTOCHTML(allHeadings, maxLevel);

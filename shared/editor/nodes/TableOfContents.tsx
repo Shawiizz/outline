@@ -27,7 +27,7 @@ export default class TableOfContents extends Node {
             attrs: {
                 // Maximum heading level to include (1-6)
                 maxLevel: {
-                    default: 3,
+                    default: 4,
                 },
             },
             group: "block",
@@ -38,7 +38,7 @@ export default class TableOfContents extends Node {
                 {
                     tag: "div.table-of-contents-block",
                     getAttrs: (dom: HTMLDivElement) => ({
-                        maxLevel: parseInt(dom.dataset.maxLevel || "3", 10),
+                        maxLevel: parseInt(dom.dataset.maxLevel || "4", 10),
                     }),
                 },
             ],
@@ -85,7 +85,7 @@ export default class TableOfContents extends Node {
         return (): Command =>
             (state, dispatch) => {
                 const { tr, selection } = state;
-                const node = type.create({ maxLevel: 3 });
+                const node = type.create({ maxLevel: 4 });
 
                 if (dispatch) {
                     dispatch(tr.replaceSelectionWith(node).scrollIntoView());
@@ -101,7 +101,7 @@ export default class TableOfContents extends Node {
                 const { tr } = state;
 
                 if (match[0]) {
-                    tr.replaceWith(start - 1, end, type.create({ maxLevel: 3 }));
+                    tr.replaceWith(start - 1, end, type.create({ maxLevel: 4 }));
                 }
 
                 return tr;
@@ -117,7 +117,7 @@ export default class TableOfContents extends Node {
     parseMarkdown() {
         return {
             block: "table_of_contents",
-            getAttrs: () => ({ maxLevel: 3 }),
+            getAttrs: () => ({ maxLevel: 4 }),
         };
     }
 }
