@@ -1,4 +1,5 @@
 import Router from "koa-router";
+import { PassThrough } from "stream";
 import env from "@server/env";
 import auth from "@server/middlewares/authentication";
 import { rateLimiter } from "@server/middlewares/rateLimiter";
@@ -15,6 +16,15 @@ interface OpenAIResponse {
     message: {
       content: string;
     };
+  }>;
+}
+
+interface OpenAIStreamChunk {
+  choices: Array<{
+    delta: {
+      content?: string;
+    };
+    finish_reason?: string;
   }>;
 }
 
@@ -218,6 +228,328 @@ async function callGemini(
   return candidate.content.parts[0]?.text || "I couldn't generate a response.";
 }
 
+// Streaming function for OpenAI
+async function* streamOpenAI(
+  messages: Array<{ role: string; content: string }>,
+  model: string,
+  apiKey?: string
+): AsyncGenerator<string, void, unknown> {
+  const key = apiKey || env.OPENAI_API_KEY;
+  if (!key) {
+    throw new Error("OpenAI API key not configured");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: 4000, // Reduced for iterative approach
+      temperature: 0.7,
+      stream: true,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error("[OpenAI Stream] API error:", error);
+    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const body = response.body;
+  if (!body) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for await (const chunk of body as AsyncIterable<Buffer>) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === "data: [DONE]") continue;
+      if (!trimmed.startsWith("data: ")) continue;
+
+      try {
+        const data = JSON.parse(trimmed.slice(6)) as OpenAIStreamChunk;
+        const content = data.choices[0]?.delta?.content;
+        if (content) {
+          yield content;
+        }
+      } catch {
+        // Skip invalid JSON
+      }
+    }
+  }
+}
+
+// Streaming function for Gemini
+async function* streamGemini(
+  messages: Array<{ role: string; content: string }>,
+  model: string,
+  apiKey?: string
+): AsyncGenerator<string, void, unknown> {
+  const key = apiKey || env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("Gemini API key not configured");
+  }
+
+  const contents = messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
+  const systemMessage = messages.find((m) => m.role === "system");
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": key,
+      },
+      body: JSON.stringify({
+        contents,
+        systemInstruction: systemMessage
+          ? { parts: [{ text: systemMessage.content }] }
+          : undefined,
+        generationConfig: {
+          maxOutputTokens: 4000, // Reduced for iterative approach
+          temperature: 0.7,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error("[Gemini Stream] API error:", error);
+    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const body = response.body;
+  if (!body) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for await (const chunk of body as AsyncIterable<Buffer>) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+
+      try {
+        const data = JSON.parse(trimmed.slice(6)) as GeminiResponse;
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          yield text;
+        }
+      } catch {
+        // Skip invalid JSON
+      }
+    }
+  }
+}
+
+// Build the iterative agent system prompt
+function buildIterativeAgentPrompt(
+  documentContext?: string,
+  continueFrom?: string,
+  maxEdits = 12,
+  iterationCount = 1,
+  contextSummary?: string
+): string {
+  let systemPrompt = `<identity>
+You are an expert AI document editing agent for Outline, a collaborative rich-text editor.
+You EXECUTE edits - you don't just describe what you would do.
+</identity>
+
+<critical_behavior>
+⚠️ YOU MUST ACTUALLY MAKE EDITS - NOT JUST DESCRIBE THEM
+- WRONG: "I will add a section about X" → This does NOTHING
+- CORRECT: Include actual edit objects in the "edits" array
+
+⚠️ NEVER SAY "DONE" WITHOUT CHECKING:
+- Empty edits array + "done" = You didn't do anything!
+- Before saying complete, verify your edits array contains the changes
+- If user asks to reorganize/rewrite → you MUST have edits in the array
+</critical_behavior>
+
+<core_principles>
+1. ACTION OVER DESCRIPTION: Generate edits, don't describe what you would do
+2. ATOMIC PRECISION: One logical change per edit, max ${maxEdits} edits per iteration
+3. VERIFY BEFORE ACTING: Check document state before editing
+4. NO DUPLICATES: Scan the document before inserting content
+5. USER LANGUAGE: Respond in the user's language
+</core_principles>
+
+<response_format>
+Respond with ONLY valid JSON, no markdown code blocks:
+
+{
+  "response": "Brief summary of changes ACTUALLY MADE (not planned)",
+  "edits": [...],  // ⚠️ MUST contain actual edits if work was requested
+  "hasMore": boolean,
+  "verification": boolean
+}
+
+⚠️ VALIDATION CHECK before responding:
+- User asked for changes? → edits array MUST NOT be empty
+- edits is empty? → You're probably just describing, not doing
+- Set "hasMore": true if ANY work remains
+</response_format>
+
+<edit_schema>
+{
+  "blockId": "blk_xxx",           // EXACT ID from document (no prefixes)
+  "action": "replace|delete|insertAfter",
+  "replaceWith": "new content",   // Not needed for delete
+  "description": "Brief description in user's language"
+}
+
+⚠️ CRITICAL RULES:
+- blockId: Use ONLY the ID part (e.g., "blk_mipvyt33kzo9qn")
+- NEVER include prefixes like "ID:", "LIST:", or "ITEM:" in blockId
+- Extract just the blk_xxx portion from markers
+</edit_schema>
+
+<document_structure>
+Block markers in document:
+- [ID:blk_xxx] content → blockId: "blk_xxx"
+- [LIST:blk_xxx] (type with N items) → blockId: "blk_xxx"
+- [ITEM:blk_xxx_item0] → blockId: "blk_xxx_item0"
+- [NON-EDITABLE:type] → Can only be deleted or moved
+
+Available block types:
+- Text: paragraph, heading (# ## ### ####)
+- Lists: bullet_list, ordered_list, checkbox_list
+- Code: code_fence (\`\`\`lang), math_block ($$)
+- Navigation: table_of_contents (use [[toc]] to insert)
+- Other: blockquote (>), hr (---), table, image
+</document_structure>
+
+<workflow>
+BEFORE each edit:
+1. "Does this content already exist?" → Skip if yes
+2. "Is this the correct blockId?" → Verify in document
+3. "Will this preserve document integrity?" → Be careful with deletions
+
+EACH iteration:
+1. Audit current document state
+2. Plan up to ${maxEdits} atomic edits
+3. EXECUTE edits (put them in the edits array!)
+4. Set hasMore: true if work remains
+
+⚠️ SELF-CHECK before sending response:
+- Did user ask for document changes? YES
+- Is my edits array empty? → WRONG! Go back and add actual edits
+- Am I describing future work? → WRONG! Do the work NOW
+
+FINAL verification (when you believe task is complete):
+{
+  "response": "Vérification: [requested vs completed]",
+  "edits": [...fixes if any...],
+  "hasMore": false,
+  "verification": true
+}
+</workflow>
+
+<quality_standards>
+- ACTION: If user requests changes, your edits array MUST contain edits
+- CONCISE: No preamble ("I will..."), no postamble ("Let me know...")
+- PRECISE: Use exact blockIds, no guessing
+- THOROUGH: Complete the full request, don't stop early
+- MARKDOWN: Always use proper markdown formatting:
+  * Headings: # (h1), ## (h2), ### (h3), #### (h4) - don't forget them!
+  * Emphasis: **bold**, *italic*
+  * Code: \`inline\` or \`\`\`blocks\`\`\`
+- LISTS: Keep list formatting clean:
+  * Use ONLY numbers (1. 2. 3.) OR bullets (- or *) - never mix in same level
+  * WRONG: "3. a. text" or "1. - item" → broken formatting
+  * For sub-items: use nested lists, not "a. b. c." inline
+  * Each list item = ONE prefix only (either "1." or "-", not both)
+- NEVER describe future actions - DO them now with actual edits
+</quality_standards>`;
+
+  // If we have a context summary, include it to reduce cognitive load
+  if (contextSummary) {
+    systemPrompt += `
+
+=== CONTEXT SUMMARY (from previous iterations) ===
+${contextSummary}
+===
+
+⚠️ CRITICAL: The above summary contains the ORIGINAL USER REQUEST and REMAINING WORK.
+- You MUST complete ALL remaining tasks from the original request
+- Do NOT say "done" unless the original request is FULLY satisfied
+- If you say "next step will be X" → WRONG! Do X now with actual edits
+- Check the document below to see what still needs to be done
+- Set hasMore: true if ANY work from the original request remains`;
+  }
+
+  if (continueFrom) {
+    systemPrompt += `
+
+=== ITERATION ${iterationCount} ===
+🔄 CONTINUING WORK - Document has been UPDATED with your previous edits.
+
+⚠️ IMPORTANT: Block IDs may have CHANGED since your last response!
+- ALWAYS check the CURRENT DOCUMENT below for valid block IDs
+- The IDs you used before may no longer exist
+- Use ONLY the IDs you see in the document RIGHT NOW
+
+STEP 1: AUDIT the document below
+- Note the CURRENT block IDs (they start with blk_)
+- List sections/content that NOW EXIST (your previous work)
+- List what STILL NEEDS to be done
+- Check for any DUPLICATES to remove
+
+STEP 2: PLAN next ${maxEdits} atomic edits
+- Use ONLY block IDs from the CURRENT document
+- Only work on content that DOESN'T EXIST yet
+- If you see a heading/section you were about to add → IT'S DONE, skip it
+
+STEP 3: EXECUTE with precision
+- Double-check each blockId before editing
+- Use "delete" if you spot duplicates
+
+⚠️ DUPLICATE PREVENTION:
+Before ANY insertAfter, search the document for:
+- Same heading text
+- Similar paragraph content
+- Related section names
+If found → DO NOT INSERT, move to next task`;
+  }
+
+  if (documentContext) {
+    systemPrompt += `
+
+CURRENT DOCUMENT:
+---
+${documentContext.substring(0, 35000)}
+---`;
+  }
+
+  return systemPrompt;
+}
+
 router.post(
   "ai.chat",
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
@@ -267,99 +599,115 @@ router.post(
 
     if (mode === "agent") {
       requestEdits = true;
-      systemPrompt = `You are an AI agent for Outline (a rich-text document editor). Respond ONLY with raw JSON.
+      systemPrompt = `<identity>
+You are an expert AI document editing agent for Outline, a collaborative rich-text editor.
+You EXECUTE document edits - you don't just describe what you would do.
+Respond ONLY with valid JSON - no markdown code blocks.
+</identity>
 
-FORMAT:
-{"response": "explanation", "edits": [{"blockId": "xxx", "replaceWith": "content", "action": "delete|replace|insertAfter", "description": "what"}]}
+<critical_behavior>
+⚠️ YOU MUST ACTUALLY MAKE EDITS - NOT DESCRIBE THEM
+- WRONG: "I will reorganize the document" with empty edits → Does nothing!
+- CORRECT: Include actual edit objects in the "edits" array
+- If user asks for changes → edits array MUST contain edits
+</critical_behavior>
 
-DOCUMENT STRUCTURE:
-- Regular blocks: [ID:blk_xxx] content
-- Lists: [LIST:blk_xxx] (type list with N items)
-  - List items: [ITEM:blk_xxx_item0] - content
-- Non-editable standalone: [ID:blk_xxx] [NON-EDITABLE:type] description
+<response_format>
+{"response": "brief summary of changes MADE", "edits": [...]}
+Only if truly no edits needed: {"response": "answer", "edits": []}
+⚠️ Empty edits when user asked for changes = FAILURE
+</response_format>
 
-BLOCK TYPES & IDs:
-1. **Regular blocks** (paragraph, heading, etc.): Use [ID:blk_xxx]
-2. **List items**: Use [ITEM:blk_xxx_itemN] - individual items you can edit separately
-3. **Entire lists**: Use [LIST:blk_xxx] to delete/replace the whole list
-4. **Non-editable standalone blocks** (images, videos, tables at top level): Can only DELETE
+<edit_schema>
+{
+  "blockId": "blk_xxx",              // EXACT ID from document markers
+  "action": "replace|delete|insertAfter|moveAfter",
+  "replaceWith": "markdown content", // Not needed for delete
+  "targetBlockId": "blk_yyy",        // Only for moveAfter
+  "description": "what this edit does"
+}
+</edit_schema>
 
-SPECIAL MARKDOWN SYNTAX - MUST PRESERVE EXACTLY:
-- **Images**: \`![alt](url)\` or \`![alt](url "=WIDTHxHEIGHT")\`
-  Example: \`![](https://example.com/img.png "=800x600")\`
-  
-  ⚠️ CRITICAL: Image markdown MUST be on ONE LINE - NEVER add line breaks!
-  ✅ Correct: \`![](https://example.com/img.png "=800x600")\`
-  ❌ WRONG: \`![]\n(https://example.com/img.png "=800x600")\` ← This BREAKS the image!
-  
-- Copy the ENTIRE image markdown as ONE string, unchanged
-- Never split \`![...](url)\` across multiple lines
+<document_structure>
+Block markers:
+- [ID:blk_xxx] content → blockId: "blk_xxx"
+- [LIST:blk_xxx] (type with N items) → target list or use item IDs
+- [ITEM:blk_xxx_item0] → blockId: "blk_xxx_item0"
+- [NON-EDITABLE:type] → Can ONLY delete or moveAfter
+</document_structure>
 
-ACTIONS:
-- "replace": Replace content. For list items, provide the FULL content including any images
-- "delete": Remove the block entirely
-- "insertAfter": Add new content after this block
+<block_types>
+TEXT:
+- paragraph: Plain text
+- heading: # (h1), ## (h2), ### (h3), #### (h4)
+- blockquote: > Quote text
 
-CRITICAL RULES:
+LISTS (target items individually):
+- bullet_list / ordered_list / checkbox_list
+- Checkbox items: [ ] unchecked, [x] checked
+- When replacing items: text only, no prefix
 
-1. **LIST ITEMS ARE INDIVIDUAL**: Each [ITEM:xxx] is separate. To modify one item, target its specific ID.
+CODE & MATH:
+- code_fence: \`\`\`language\\ncode\\n\`\`\`
+- math_block: $$\\nLaTeX\\n$$
 
-2. **ADDING TO LISTS**: Use "insertAfter" on the LAST item of the list with the new item's text.
-   Example: {"blockId": "blk_abc_item2", "action": "insertAfter", "replaceWith": "New fourth item", "description": "Add item"}
+NOTICES (:::style ... :::):
+- info, warning, success, tip
 
-3. **ITEM CONTENT**: When replacing a list item, provide ONLY the text content, NOT the bullet/number prefix.
-   ✅ "replaceWith": "Updated item text"
-   ❌ "replaceWith": "- Updated item text"
+NAVIGATION:
+- table_of_contents: [[toc]] (auto-generated from headings)
 
-4. **IMAGES IN CONTENT**: If an item contains an image like \`![](url "=WxH")\`:
-   - Copy the ENTIRE image markdown on ONE LINE - no line breaks!
-   - The format is: \`![alt](url "=WIDTHxHEIGHT")\` - all on one line
-   - You can add/modify text BEFORE or AFTER the image
-   - Example original: \`Text before ![](https://x.com/img.png "=800x600")Text after\`
-   - Example modified: \`New text ![](https://x.com/img.png "=800x600")New text after\`
+OTHER:
+- hr: --- (divider) or *** (page break)
+- table: | Col1 | Col2 |\\n|---|---|\\n| A | B |
+- image: ![alt](url) or ![alt](url "=WxH")
+</block_types>
 
-5. **NON-EDITABLE STANDALONE BLOCKS**: [NON-EDITABLE:type] at top level can ONLY be deleted.
+<actions>
+- replace: Change block content (use exact markdown)
+- delete: Remove block entirely
+- insertAfter: Add new block after this one
+- moveAfter: Move block to new position (use targetBlockId)
+</actions>
 
-6. **PRESERVE STRUCTURE**: Don't convert paragraphs to lists or vice versa unless explicitly asked.
+<critical_rules>
+1. ACTION REQUIRED: User asks for changes → you MUST provide edits
+2. Use EXACT blockId from markers - strip prefixes (ID:, LIST:, ITEM:)
+3. List items are individual - target specific [ITEM:] IDs
+4. Images: Keep all on ONE line, preserve "=WxH" dimensions
+5. Non-editable blocks: Only delete or move
+6. Match user's language in response and description
+</critical_rules>
 
-7. **HEADINGS**: When replacing a heading, include the markdown prefix to set the level:
-   - \`# Title\` for h1, \`## Title\` for h2, \`### Title\` for h3, etc.
-   - To keep the same level, check the original content and use the same number of \`#\`
-   - Example: {"blockId": "blk_xyz", "action": "replace", "replaceWith": "## New Heading Title", "description": "Update heading"}
+<examples>
+Insert code block:
+{"blockId": "blk_xyz", "action": "insertAfter", "replaceWith": "\`\`\`python\\nprint('hello')\\n\`\`\`", "description": "Add Python code"}
 
-EXAMPLES:
+Create warning:
+{"blockId": "blk_xyz", "action": "insertAfter", "replaceWith": ":::warning\\nBe careful!\\n:::", "description": "Add warning"}
 
-1. Modify a list item:
-   {"blockId": "blk_abc_item1", "action": "replace", "replaceWith": "Updated second item", "description": "Fix typo"}
+Update list item:
+{"blockId": "blk_abc_item1", "action": "replace", "replaceWith": "Fixed text", "description": "Fix typo"}
 
-2. Add item to end of bullet list (list has items 0,1,2):
-   {"blockId": "blk_abc_item2", "action": "insertAfter", "replaceWith": "Fourth item", "description": "Add new item"}
+Move video:
+{"blockId": "blk_video", "action": "moveAfter", "targetBlockId": "blk_para", "description": "Move after paragraph"}
+</examples>
 
-3. Delete a specific list item:
-   {"blockId": "blk_abc_item1", "action": "delete", "replaceWith": "", "description": "Remove item"}
-
-4. Delete entire list:
-   {"blockId": "blk_abc", "action": "delete", "replaceWith": "", "description": "Remove whole list"}
-
-5. Modify a paragraph:
-   {"blockId": "blk_xyz", "action": "replace", "replaceWith": "New paragraph text", "description": "Update text"}
-
-6. Delete an image (NON-EDITABLE standalone block):
-   {"blockId": "blk_img", "action": "delete", "replaceWith": "", "description": "Remove image"}
-
-7. Modify list item that contains an image (add text, keep image on ONE LINE):
-   Original: "Check this: ![](https://x.com/img.png \\"=800x600\\")Result above."
-   {"blockId": "blk_abc_item2", "action": "replace", "replaceWith": "Check this screenshot: ![](https://x.com/img.png \\"=800x600\\")The result shows success!", "description": "Improve text"}
-
-WRONG EXAMPLES:
-❌ {"blockId": "blk_img", "action": "replace", ...} // Can't replace standalone non-editable block!
-❌ {"blockId": "blk_abc_item0", "replaceWith": "- Text"} // Don't include bullet prefix!
-❌ {"replaceWith": "Text ![]\n(url \\"=WxH\\")"} // NEVER split image markdown across lines!
-
-RULES:
-1. Use EXACT IDs from [ID:], [LIST:], or [ITEM:] markers
-2. Match user's language
-3. No changes needed? {"response": "answer", "edits": []}`;
+<quality_standards>
+- ACTION: User asks for changes → edits array MUST have edits
+- CONCISE: Brief response, no "I will..." or "Let me know..."
+- PRECISE: Exact blockIds, proper markdown syntax
+- COMPLETE: Address full user request in one response
+- MARKDOWN: Always use proper markdown formatting:
+  * Headings: # (h1), ## (h2), ### (h3), #### (h4) - don't forget them!
+  * Emphasis: **bold**, *italic*
+- LISTS: Keep list formatting clean:
+  * Use ONLY numbers (1. 2. 3.) OR bullets (-) - never mix in same level
+  * WRONG: "3. a. text" or "1. - item" → broken formatting
+  * For sub-items: use nested lists, not "a. b. c." inline
+  * Each list item = ONE prefix only
+- NEVER describe future work - DO the work now with actual edits
+</quality_standards>`;
 
       if (documentContext) {
         systemPrompt += `
@@ -374,9 +722,38 @@ ${documentContext.substring(0, 30000)}
 NOTE: No document content was provided. Ask the user to ensure they have a document open.`;
       }
     } else {
-      systemPrompt = `You are a helpful AI assistant integrated into a document editor called Outline. 
-You help users with their writing, answer questions about their documents, and provide helpful suggestions.
-Be concise, helpful, and friendly. Format your responses using markdown when appropriate.`;
+      systemPrompt = `<identity>
+You are a knowledgeable AI assistant integrated into Outline, a collaborative document editor.
+</identity>
+
+<capabilities>
+- Answer questions about documents and their content
+- Help with writing, editing, and structuring text
+- Provide explanations, summaries, and suggestions
+- Assist with formatting and markdown
+</capabilities>
+
+<communication_style>
+- Be CONCISE: Get to the point, avoid filler phrases
+- Be HELPFUL: Provide actionable, useful information
+- Be CLEAR: Use simple language, structure with markdown
+- MATCH user's language: Respond in the same language as the user
+</communication_style>
+
+<formatting>
+- Use markdown for structure: **bold**, *italic*, \`code\`, lists
+- Use headers sparingly (## and ### only when helpful)
+- Keep paragraphs short and focused
+- Use bullet points for lists of items
+</formatting>
+
+<guidelines>
+- NO preamble ("Here's what I found...", "I'd be happy to...")
+- NO postamble ("Let me know if you need more...", "Hope this helps!")
+- Answer questions directly
+- Provide examples when they add clarity
+- If unsure, say so briefly rather than guessing
+</guidelines>`;
 
       if (documentContext) {
         systemPrompt += `\n\nThe user is currently working on a document titled: "${documentContext}"`;
@@ -741,6 +1118,383 @@ router.post(
         serverHasKeys,
       },
     };
+  }
+);
+
+// SSE Streaming endpoint for real-time AI responses
+router.post(
+  "ai.chat.stream",
+  rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
+  auth(),
+  validate(T.AiChatStreamSchema),
+  async (ctx: APIContext<T.AiChatStreamReq>) => {
+    const {
+      message,
+      documentContext,
+      history,
+      provider,
+      model,
+      mode,
+      clientApiKey,
+      continueFrom,
+      maxEditsPerIteration = 12,
+      iterationCount = 1,
+      contextSummary,
+      summarizedAtIteration = 0
+    } = ctx.input.body;
+
+    console.log("[AI Stream] Request received, mode:", mode, "iteration:", iterationCount, "continueFrom:", !!continueFrom);
+
+    // Determine provider and model
+    const availableProviders = Object.keys(PROVIDERS).filter(pid => {
+      const key = getApiKeyForProvider(pid, pid === provider ? clientApiKey : undefined);
+      return !!key;
+    });
+
+    const selectedProvider = provider && availableProviders.includes(provider)
+      ? provider
+      : availableProviders[0] || null;
+
+    const activeApiKey = selectedProvider
+      ? getApiKeyForProvider(selectedProvider, clientApiKey)
+      : undefined;
+
+    let selectedModel = model;
+    if (!selectedModel) {
+      if (selectedProvider === "openai") {
+        selectedModel = env.OPENAI_MODEL || "gpt-3.5-turbo";
+      } else {
+        selectedModel = env.GEMINI_MODEL || "gemini-2.5-flash";
+      }
+    }
+
+    // Check for API keys
+    if (!selectedProvider || !activeApiKey) {
+      ctx.status = 400;
+      ctx.body = { error: "No AI provider configured" };
+      return;
+    }
+
+    // Set up SSE response
+    ctx.request.socket.setTimeout(0);
+    ctx.request.socket.setNoDelay(true);
+    ctx.request.socket.setKeepAlive(true);
+
+    ctx.set({
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const stream = new PassThrough();
+    ctx.status = 200;
+    ctx.body = stream;
+
+    // Helper to send SSE events
+    const sendEvent = (event: string, data: unknown) => {
+      stream.write(`event: ${event}\n`);
+      stream.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      // Build messages
+      const messages: Array<{ role: string; content: string }> = [];
+
+      // System prompt based on mode
+      let systemPrompt: string;
+      if (mode === "agent") {
+        systemPrompt = buildIterativeAgentPrompt(
+          documentContext,
+          continueFrom,
+          maxEditsPerIteration,
+          iterationCount,
+          contextSummary
+        );
+      } else {
+        systemPrompt = `<identity>
+You are a knowledgeable AI assistant integrated into Outline, a collaborative document editor.
+</identity>
+
+<capabilities>
+- Answer questions about documents and their content
+- Help with writing, editing, and structuring text
+- Provide explanations, summaries, and suggestions
+- Assist with formatting and markdown
+</capabilities>
+
+<communication_style>
+- Be CONCISE: Get to the point, avoid filler phrases
+- Be HELPFUL: Provide actionable, useful information
+- Be CLEAR: Use simple language, structure with markdown
+- MATCH user's language: Respond in the same language as the user
+</communication_style>
+
+<formatting>
+- Use markdown for structure: **bold**, *italic*, \`code\`, lists
+- Use headers sparingly (## and ### only when helpful)
+- Keep paragraphs short and focused
+- Use bullet points for lists of items
+</formatting>
+
+<guidelines>
+- NO preamble ("Here's what I found...", "I'd be happy to...")
+- NO postamble ("Let me know if you need more...", "Hope this helps!")
+- Answer questions directly
+- Provide examples when they add clarity
+- If unsure, say so briefly rather than guessing
+</guidelines>`;
+
+        if (documentContext) {
+          systemPrompt += `\n\nThe user is currently working on a document. Here's the content:\n${documentContext.substring(0, 20000)}`;
+        }
+      }
+
+      messages.push({ role: "system", content: systemPrompt });
+
+      // Add history (use provided history, which may already be summarized on client)
+      if (history && history.length > 0) {
+        // If we have a context summary, we don't need as much history
+        const historyLimit = contextSummary ? 4 : 10;
+        for (const msg of history.slice(-historyLimit)) {
+          messages.push({ role: msg.role, content: msg.content });
+        }
+      }
+
+      // Add current message
+      messages.push({ role: "user", content: message });
+
+      sendEvent("start", { provider: selectedProvider, model: selectedModel });
+
+      let fullContent = "";
+
+      // Stream based on provider
+      if (selectedProvider === "openai") {
+        for await (const chunk of streamOpenAI(messages, selectedModel, activeApiKey)) {
+          fullContent += chunk;
+          sendEvent("chunk", { content: chunk });
+        }
+      } else if (selectedProvider === "gemini") {
+        for await (const chunk of streamGemini(messages, selectedModel, activeApiKey)) {
+          fullContent += chunk;
+          sendEvent("chunk", { content: chunk });
+        }
+      }
+
+      // For agent mode, parse the response and extract edits
+      if (mode === "agent") {
+        try {
+          // Clean up response
+          let cleanedResponse = fullContent.trim();
+
+          // Handle empty response (iteration complete with no more work)
+          if (!cleanedResponse) {
+            sendEvent("complete", {
+              response: "Toutes les modifications ont été appliquées.",
+              edits: [],
+              hasMore: false
+            });
+            stream.end();
+            return;
+          }
+
+          // Remove markdown code blocks
+          if (cleanedResponse.startsWith("```json")) {
+            cleanedResponse = cleanedResponse.slice(7);
+          } else if (cleanedResponse.startsWith("```")) {
+            cleanedResponse = cleanedResponse.slice(3);
+          }
+          if (cleanedResponse.endsWith("```")) {
+            cleanedResponse = cleanedResponse.slice(0, -3);
+          }
+          cleanedResponse = cleanedResponse.trim();
+
+          // Try to find a complete JSON object
+          let jsonStart = cleanedResponse.indexOf("{");
+          if (jsonStart === -1) {
+            // No JSON found - might be a plain text response
+            // Check if it looks like a completion message
+            const lowerContent = cleanedResponse.toLowerCase();
+            if (lowerContent.includes("termin") || lowerContent.includes("complet") ||
+              lowerContent.includes("fini") || lowerContent.includes("done") ||
+              lowerContent.includes("all") || cleanedResponse.length < 100) {
+              sendEvent("complete", {
+                response: cleanedResponse || "Modifications terminées.",
+                edits: [],
+                hasMore: false
+              });
+              stream.end();
+              return;
+            }
+            throw new Error("No JSON object found in response");
+          }
+
+          // Find matching closing brace
+          let depth = 0;
+          let jsonEnd = -1;
+          let inString = false;
+          let escapeNext = false;
+
+          for (let i = jsonStart; i < cleanedResponse.length; i++) {
+            const char = cleanedResponse[i];
+
+            if (escapeNext) {
+              escapeNext = false;
+              continue;
+            }
+
+            if (char === '\\') {
+              escapeNext = true;
+              continue;
+            }
+
+            if (char === '"' && !escapeNext) {
+              inString = !inString;
+              continue;
+            }
+
+            if (!inString) {
+              if (char === '{') depth++;
+              else if (char === '}') {
+                depth--;
+                if (depth === 0) {
+                  jsonEnd = i + 1;
+                  break;
+                }
+              }
+            }
+          }
+
+          let parsed: { response?: string; edits?: unknown[]; hasMore?: boolean };
+
+          if (jsonEnd === -1) {
+            // JSON is incomplete - extract what we can
+            console.log("[AI Stream] JSON appears incomplete, extracting partial data");
+
+            // Extract response field using regex
+            const responseMatch = cleanedResponse.match(/"response"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+            const extractedResponse = responseMatch
+              ? responseMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n')
+              : "Modifications en cours...";
+
+            // Extract complete edit objects from the edits array
+            const completeEdits: Array<{ blockId?: string; id?: string; action?: string; replaceWith?: string; description?: string }> = [];
+            const editsMatch = cleanedResponse.match(/"edits"\s*:\s*\[/);
+            if (editsMatch) {
+              const editsStart = cleanedResponse.indexOf(editsMatch[0]) + editsMatch[0].length;
+              let editDepth = 0;
+              let editStart = -1;
+              inString = false;
+              escapeNext = false;
+
+              for (let i = editsStart; i < cleanedResponse.length; i++) {
+                const char = cleanedResponse[i];
+                if (escapeNext) { escapeNext = false; continue; }
+                if (char === '\\') { escapeNext = true; continue; }
+                if (char === '"' && !escapeNext) { inString = !inString; continue; }
+
+                if (!inString) {
+                  if (char === '{') {
+                    if (editDepth === 0) editStart = i;
+                    editDepth++;
+                  } else if (char === '}') {
+                    editDepth--;
+                    if (editDepth === 0 && editStart !== -1) {
+                      // Found a complete edit object
+                      const editJson = cleanedResponse.substring(editStart, i + 1);
+                      try {
+                        const edit = JSON.parse(editJson);
+                        completeEdits.push(edit);
+                      } catch {
+                        // Skip invalid edit
+                      }
+                      editStart = -1;
+                    }
+                  } else if (char === ']' && editDepth === 0) {
+                    break; // End of edits array
+                  }
+                }
+              }
+            }
+
+            // Check for hasMore
+            const hasMoreMatch = cleanedResponse.match(/"hasMore"\s*:\s*(true|false)/);
+            const hasMore = hasMoreMatch ? hasMoreMatch[1] === "true" : true; // Default to true for incomplete
+
+            parsed = {
+              response: extractedResponse,
+              edits: completeEdits,
+              hasMore,
+            };
+          } else {
+            cleanedResponse = cleanedResponse.substring(jsonStart, jsonEnd);
+            parsed = JSON.parse(cleanedResponse);
+          }
+
+          const response = typeof parsed.response === "string" ? parsed.response : "Modifications appliquées";
+          const hasMore = parsed.hasMore === true;
+          const edits = Array.isArray(parsed.edits)
+            ? parsed.edits.filter((edit: { blockId?: string; id?: string; action?: string }) => {
+              // Accept both 'blockId' and 'id' fields
+              const blockId = edit.blockId || edit.id;
+              return typeof blockId === "string" &&
+                blockId.length > 0 &&
+                typeof edit.action === "string";
+            }).map((edit: {
+              blockId?: string;
+              id?: string;
+              replaceWith?: string;
+              action: string;
+              targetBlockId?: string;
+              description?: string
+            }) => ({
+              blockId: edit.blockId || edit.id || "",
+              replaceWith: edit.replaceWith || "",
+              action: edit.action,
+              targetBlockId: edit.targetBlockId,
+              description: edit.description || "",
+            }))
+            : [];
+
+          sendEvent("complete", {
+            response,
+            edits,
+            hasMore,
+            rawContent: fullContent
+          });
+        } catch (parseError) {
+          console.error("[AI Stream] Failed to parse agent response:", parseError);
+          console.error("[AI Stream] Raw content (first 1000 chars):", fullContent.substring(0, 1000));
+
+          // Try to extract at least the response text from the raw content
+          let extractedResponse = fullContent;
+          try {
+            // Try to find and extract just the response field
+            const responseMatch = fullContent.match(/"response"\\s*:\\s*"([^"]*(?:\\\\"[^"]*)*)"/);
+            if (responseMatch) {
+              extractedResponse = responseMatch[1].replace(/\\\\"/g, '"').replace(/\\\\n/g, '\n');
+            }
+          } catch {
+            // Keep original content
+          }
+
+          sendEvent("complete", {
+            response: extractedResponse,
+            edits: [],
+            hasMore: false
+          });
+        }
+      } else {
+        sendEvent("complete", { response: fullContent });
+      }
+
+      stream.end();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("[AI Stream] Error:", errorMessage);
+      sendEvent("error", { message: errorMessage });
+      stream.end();
+    }
   }
 );
 

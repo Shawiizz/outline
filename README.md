@@ -94,8 +94,10 @@ docker build --no-cache -t outline .
 ```
 
 ```
-docker build --no-cache -f Dockerfile.base -t shawiizz/outline-base:latest .
-docker build --no-cache -t shawiizz/outline:latest .
+docker build --no-cache -f Dockerfile.base -t shawiizz/outline-base:latest . \
+docker push shawiizz/outline-base:latest \
+docker build --no-cache -t shawiizz/outline:latest . \
+docker push shawiizz/outline:latest
 
 ```
 

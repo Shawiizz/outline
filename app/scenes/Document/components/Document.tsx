@@ -152,13 +152,20 @@ class DocumentScene extends React.Component<Props> {
    * Supports two types of IDs:
    * - Block IDs: "blk_xxx" - top-level blocks (paragraphs, headings, lists)
    * - List item IDs: "blk_xxx_itemN" - individual items within a list
+   * 
+   * Supported actions:
+   * - replace: Replace the block content
+   * - delete: Remove the block
+   * - insertAfter: Insert new content after the block
+   * - moveAfter: Move a block to after another block (targetBlockId)
    */
   handleAiEdit = (event: CustomEvent<{
     documentId: string;
     edit: {
       blockId: string;
       replaceWith: string;
-      action: "replace" | "delete" | "insertAfter";
+      action: "replace" | "delete" | "insertAfter" | "moveAfter";
+      targetBlockId?: string;
     };
   }>) => {
     const { documentId, edit } = event.detail;
@@ -174,6 +181,8 @@ class DocumentScene extends React.Component<Props> {
     }
 
     const { view, schema, parser } = editorRef;
+
+    console.log("[AI Edit] Processing edit:", edit.action, "on block:", edit.blockId);
 
     // Check if this is a list item ID (format: blk_xxx_itemN)
     const listItemMatch = edit.blockId.match(/^(.+)_item(\d+)$/);
@@ -292,6 +301,10 @@ class DocumentScene extends React.Component<Props> {
         const block = getBlockByBlockId(edit.blockId);
         if (!block) {
           console.error("[AI Edit] Could not find block with ID:", edit.blockId);
+          // Emit the event anyway so the flow continues (edit will just be skipped)
+          window.dispatchEvent(new CustomEvent("ai-edit-applied", {
+            detail: { documentId: this.props.document.id, skipped: true }
+          }));
           return;
         }
 
@@ -304,6 +317,37 @@ class DocumentScene extends React.Component<Props> {
             tr.insert(block.to, parseMarkdown(edit.replaceWith));
             break;
 
+          case 'moveAfter': {
+            // Move block to after targetBlockId
+            if (!edit.targetBlockId) {
+              console.error("[AI Edit] moveAfter requires targetBlockId");
+              return;
+            }
+            const targetBlock = getBlockByBlockId(edit.targetBlockId);
+            if (!targetBlock) {
+              console.error("[AI Edit] Could not find target block with ID:", edit.targetBlockId);
+              return;
+            }
+            // Clone the node to move
+            const nodeToMove = block.node;
+            // Delete original first if it comes before target, otherwise adjust positions
+            if (block.from < targetBlock.from) {
+              // Source is before target: delete first, then insert
+              tr.delete(block.from, block.to);
+              // Adjust target position after deletion
+              const adjustedTo = targetBlock.to - block.node.nodeSize;
+              tr.insert(adjustedTo, nodeToMove);
+            } else {
+              // Source is after target: insert first, then delete
+              tr.insert(targetBlock.to, nodeToMove);
+              // After insert, source position shifts by inserted size
+              const adjustedFrom = block.from + nodeToMove.nodeSize;
+              const adjustedTo = block.to + nodeToMove.nodeSize;
+              tr.delete(adjustedFrom, adjustedTo);
+            }
+            break;
+          }
+
           case 'replace':
           default:
             tr.replaceWith(block.from, block.to, parseMarkdown(edit.replaceWith.trim()));
@@ -314,6 +358,18 @@ class DocumentScene extends React.Component<Props> {
       view.dispatch(tr);
       this.isEditorDirty = true;
       this.updateIsDirty();
+
+      // Synchronize document.data with the current editor state
+      // This ensures that subsequent reads of document.data get the latest content
+      const doc = view.state.doc;
+      if (doc) {
+        this.props.document.data = doc.toJSON();
+      }
+
+      // Emit event to signal that the edit has been applied
+      window.dispatchEvent(new CustomEvent("ai-edit-applied", {
+        detail: { documentId: this.props.document.id }
+      }));
 
     } catch (error) {
       console.error("[AI Edit] Error applying edit:", error);

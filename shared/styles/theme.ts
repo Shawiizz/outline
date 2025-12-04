@@ -45,9 +45,9 @@ const defaultColors: Colors = {
 
 const spacing = {
   sidebarWidth: 260,
-  sidebarRightWidth: 300,
+  sidebarRightWidth: 350,
   sidebarCollapsedWidth: 16,
-  sidebarMinWidth: 200,
+  sidebarMinWidth: 280,
   sidebarMaxWidth: 600,
 };
 

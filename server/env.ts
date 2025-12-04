@@ -767,6 +767,30 @@ export class Environment {
   );
 
   /**
+   * OpenAI API key for AI chat functionality.
+   */
+  @IsOptional()
+  public OPENAI_API_KEY = this.toOptionalString(environment.OPENAI_API_KEY);
+
+  /**
+   * OpenAI model to use for AI chat. Defaults to gpt-3.5-turbo.
+   */
+  @IsOptional()
+  public OPENAI_MODEL = this.toOptionalString(environment.OPENAI_MODEL);
+
+  /**
+   * Google Gemini API key for AI chat functionality.
+   */
+  @IsOptional()
+  public GEMINI_API_KEY = this.toOptionalString(environment.GEMINI_API_KEY);
+
+  /**
+   * Gemini model to use for AI chat. Defaults to gemini-pro.
+   */
+  @IsOptional()
+  public GEMINI_MODEL = this.toOptionalString(environment.GEMINI_MODEL);
+
+  /**
    * The product name
    */
   @Public

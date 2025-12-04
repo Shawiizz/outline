@@ -7,17 +7,25 @@ import { Schema } from "prosemirror-model";
 import { Node } from "prosemirror-model";
 
 /**
- * Block types that contain media/attachments and should not have their content modified by AI.
- * AI can delete these blocks or insert content around them, but cannot change the content itself.
+ * Block types that contain embedded media and cannot be modified by AI at all.
+ * AI can only delete or move these blocks.
  */
 const NON_EDITABLE_BLOCK_TYPES = [
-  "image",
   "video",
   "attachment",
   "embed",
+];
+
+/**
+ * Block types that require special handling/description but content can be shown
+ */
+const SPECIAL_BLOCK_TYPES = [
   "table",
   "table_of_contents",
   "math_block",
+  "code_fence",
+  "container_notice",
+  "hr",
 ];
 
 /**
